@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, user-scalable=no"
     />
-    <title>WebXR Measurement Test (Renderer Test)</title>
+    <title>WebXR Measurement Test (RefSpace Fallback)</title>
     <style>
       /* CSS styles remain the same */
       body {
@@ -89,7 +89,7 @@
       );
 
       // --- Relevant Context ---
-      // Current time: Friday, March 28, 2025 at 6:19 PM
+      // Current time: Friday, March 28, 2025 at 6:02 PM
       // Location: Kochi, Kerala, India
 
       // Global variables
@@ -100,15 +100,17 @@
       let markers = [];
       let measurementPoints = [];
       let currentSession = null;
-      let referenceSpace = null;
+      let referenceSpace = null; // Store the primary reference space ('local' or 'local-floor')
       let shouldPlaceMarker = false;
 
+      // Get elements *outside* init, check they exist *inside* init or DOMContentLoaded
       const infoDivElement = document.getElementById('info');
       const startButtonElement = document.getElementById('start-ar-button');
 
       // --- Initialization ---
       function init() {
         console.log('init() called');
+        // Check if elements were found before trying to use them
         if (!infoDivElement) {
           console.error('FATAL: infoDivElement not found!');
           alert("Error: UI element 'info' not found.");
@@ -131,14 +133,7 @@
             40
           );
 
-          // --- MODIFICATION: Simplify renderer options ---
-          // Original: { antialias: true, alpha: true }
-          // Test 1: Remove antialias, keep alpha (needed for see-through)
-          renderer = new THREE.WebGLRenderer({ alpha: true });
-          // Test 2 (If Test 1 fails): Default options (might break transparency)
-          // renderer = new THREE.WebGLRenderer();
-          console.log('Creating WebGLRenderer with options:', { alpha: true }); // Log options used
-
+          renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
           renderer.setPixelRatio(window.devicePixelRatio);
           renderer.setSize(window.innerWidth, window.innerHeight);
           renderer.xr.enabled = true;
@@ -150,11 +145,14 @@
           const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
           directionalLight.position.set(1, 1, 1);
           scene.add(directionalLight);
+
           controller = renderer.xr.getController(0);
           controller.addEventListener('select', onSelect);
           scene.add(controller);
+
           window.addEventListener('resize', onWindowResize, false);
 
+          // Proceed to check XR support
           checkXRSupport();
         } catch (error) {
           console.error('Error during Three.js setup:', error);
@@ -164,11 +162,12 @@
         }
       }
 
-      // --- WebXR Support Check --- (Unchanged)
+      // --- WebXR Support Check --- (Keep the detailed logging)
       async function checkXRSupport() {
         console.log('checkXRSupport() called.');
         infoDivElement.textContent = 'Checking WebXR capabilities...';
         console.log('navigator.xr:', navigator.xr);
+
         if ('xr' in navigator && navigator.xr) {
           console.log('navigator.xr exists. Checking session support...');
           infoDivElement.textContent = 'Checking for immersive-ar support...';
@@ -217,17 +216,19 @@
           displayCompatibilityError('WebXR API not available.');
         }
       }
+
       function displayCompatibilityError(message) {
         console.error('Compatibility Error:', message);
         startButtonElement.disabled = true;
       }
 
-      // --- WebXR Session Management --- (Unchanged from previous version with ref space fallback)
+      // --- WebXR Session Management ---
       async function startARSession() {
         infoDivElement.textContent = 'Starting AR session...';
         startButtonElement.disabled = true;
         startButtonElement.style.display = 'none';
         console.log('Attempting to start AR session...');
+
         if (currentSession) {
           console.warn('Session already active? Ending previous.');
           try {
@@ -237,6 +238,7 @@
           }
           currentSession = null;
         }
+
         try {
           currentSession = await navigator.xr.requestSession('immersive-ar', {
             requiredFeatures: ['hit-test'],
@@ -245,69 +247,67 @@
           onSessionStarted(currentSession);
         } catch (error) {
           console.error('Failed to start AR session:', error);
-          infoDivElement.textContent = `Failed to start AR: ${error.message}. Check permissions.`;
+          infoDivElement.textContent = `Failed to start AR: ${error.message}. Check permissions.`; // Added hint
           startButtonElement.style.display = 'block';
-          startButtonElement.disabled = false;
+          startButtonElement.disabled = false; // Re-enable button
         }
       }
 
-      // --- onSessionStarted: Add logging around setSession ---
+      // --- THIS IS THE UPDATED onSessionStarted FUNCTION ---
       async function onSessionStarted(session) {
-        infoDivElement.textContent =
-          'AR Session Active. Setting up renderer & spaces...'; // Updated text
+        infoDivElement.textContent = 'AR Session Active. Setting up spaces...';
         console.log('onSessionStarted called.');
+
         session.addEventListener('end', onSessionEnded);
 
-        // --- MODIFICATION: Add logging around the failing call ---
-        console.log('Attempting: await renderer.xr.setSession(session)...'); // Log before
         try {
           await renderer.xr.setSession(session);
-          console.log('Successfully set renderer XR session.'); // Log success
+          console.log('Three.js renderer XR session set.');
         } catch (err) {
-          console.error('Error calling renderer.xr.setSession:', err); // Log specific error
-          // Log the session object and renderer.xr object for inspection
-          console.log('Session object at time of error:', session);
-          console.log('renderer.xr object at time of error:', renderer.xr);
+          console.error('Error setting renderer XR session:', err);
           infoDivElement.textContent =
-            'Fatal Error: Could not link session to renderer: ' + err.message;
+            'Error linking session to renderer: ' + err.message;
           try {
             await session.end();
-          } catch (e) {} // Attempt cleanup
-          return; // Stop execution here if setSession fails
+          } catch (e) {}
+          return;
         }
-        // --- END MODIFICATION ---
 
-        // --- Request Reference Space (Try local, fallback to local-floor) --- (Unchanged logic)
-        referenceSpace = null;
-        let referenceSpaceType = 'unknown';
+        // --- Request Reference Space (Try local, fallback to local-floor) ---
+        referenceSpace = null; // Reset before trying
+        let referenceSpaceType = 'unknown'; // For logging
         try {
-          console.log("Attempting to request reference space: 'local'");
+          console.log("Attempting to request reference space: 'local'"); // DEBUG LOG
           referenceSpace = await session.requestReferenceSpace('local');
           referenceSpaceType = 'local';
-          console.log("Successfully obtained reference space: 'local'");
+          console.log("Successfully obtained reference space: 'local'"); // DEBUG LOG
         } catch (localError) {
           console.warn(
             `Failed to get 'local' reference space: ${localError.message}. Trying 'local-floor'.`
-          );
+          ); // DEBUG LOG
           infoDivElement.textContent = "Trying 'local-floor' space...";
           try {
-            console.log("Attempting to request reference space: 'local-floor'");
+            console.log("Attempting to request reference space: 'local-floor'"); // DEBUG LOG
             referenceSpace = await session.requestReferenceSpace('local-floor');
             referenceSpaceType = 'local-floor';
-            console.log("Successfully obtained reference space: 'local-floor'");
+            console.log("Successfully obtained reference space: 'local-floor'"); // DEBUG LOG
           } catch (floorError) {
             console.error(
               `Failed to get 'local-floor' reference space: ${floorError.message}.`
-            );
+            ); // DEBUG LOG
             infoDivElement.textContent = `Error: Could not get a suitable reference space ('local' or 'local-floor'): ${floorError.message}`;
             try {
               await session.end();
-            } catch (e) {}
-            return;
+            } catch (e) {} // Attempt cleanup
+            return; // Exit if we can't get a working space
           }
         }
+
+        // We must have a valid referenceSpace to continue
         if (!referenceSpace) {
-          console.error('Reference space is still null. Aborting setup.');
+          console.error(
+            'Reference space is still null after attempts. Aborting setup.'
+          );
           infoDivElement.textContent =
             'Fatal Error: Could not establish AR coordinate system.';
           try {
@@ -317,34 +317,40 @@
         }
         infoDivElement.textContent = `Using '${referenceSpaceType}' space. Setting up hit test...`;
 
-        // --- Request Hit Test Source --- (Unchanged logic)
-        hitTestSource = null;
+        // --- Request Hit Test Source (Still needs 'viewer' space for initiation) ---
+        hitTestSource = null; // Reset
         hitTestSourceRequested = false;
         try {
-          console.log("Attempting 'viewer' space for hit test setup");
+          console.log(
+            "Attempting to request reference space: 'viewer' (for hit test setup)"
+          ); // DEBUG LOG
           const viewerSpace = await session.requestReferenceSpace('viewer');
-          console.log("Got 'viewer' space.");
-          console.log('Attempting hit test source...');
+          console.log("Successfully obtained reference space: 'viewer'"); // DEBUG LOG
+
+          console.log('Attempting to request hit test source...'); // DEBUG LOG
           hitTestSource = await session.requestHitTestSource({
             space: viewerSpace,
           });
           hitTestSourceRequested = true;
-          console.log('Hit test source obtained.');
+          console.log('Hit test source obtained successfully.'); // DEBUG LOG
           infoDivElement.textContent = 'AR Ready. Point at a surface and tap.';
         } catch (err) {
-          console.error(`Error during hit test setup: ${err.message}`);
+          console.error(`Error during hit test setup: ${err.message}`); // DEBUG LOG
           if (err.name === 'NotSupportedError') {
-            infoDivElement.textContent = `Using '${referenceSpaceType}' space, but Hit-Test feature not supported.`;
-            console.warn('Hit testing feature not supported.');
+            infoDivElement.textContent = `Using '${referenceSpaceType}' space, but Hit-Test feature is not supported. Measurement disabled.`;
+            console.warn('Hit testing feature not supported by this session.');
           } else {
             infoDivElement.textContent = `Using '${referenceSpaceType}' space. Error setting up hit test: ${err.message}`;
           }
-          hitTestSourceRequested = false;
-          console.warn('Proceeding without hit testing.');
+          // Decide if the app can continue without hit testing. For measurement, it's essential.
+          // We'll let it continue for now, but marker placement won't work.
+          hitTestSourceRequested = false; // Ensure this is false if it failed
+          console.warn('Proceeding without hit testing capabilities.');
         }
 
-        // --- Start Render Loop --- (Unchanged logic)
+        // --- Start Render Loop ---
         if (referenceSpace) {
+          // Only start loop if we have a base reference space
           try {
             renderer.setAnimationLoop(renderFrame);
             console.log('Render loop started.');
@@ -362,9 +368,8 @@
           );
         }
       }
-      // --- END onSessionStarted ---
+      // --- END OF UPDATED onSessionStarted FUNCTION ---
 
-      // --- onSessionEnded --- (Unchanged)
       function onSessionEnded(/*event*/) {
         currentSession = null;
         hitTestSourceRequested = false;
@@ -377,30 +382,30 @@
           'AR Session ended. Click Start to begin again.';
         startButtonElement.style.display = 'block';
         startButtonElement.disabled = false;
-        // Wrap setAnimationLoop(null) in try-catch due to previous error
-        try {
-          renderer.setAnimationLoop(null);
-          console.log('AR Session Ended, render loop stopped.');
-        } catch (error) {
-          console.error(
-            'Error stopping animation loop (likely harmless after previous error):',
-            error
-          );
-        }
+        renderer.setAnimationLoop(null);
+        console.log('AR Session Ended, render loop stopped.');
       }
 
-      // --- Event Handlers --- (Unchanged)
+      // --- Event Handlers ---
       function onWindowResize() {
+        console.log('Window resized.');
         if (!renderer.xr.isPresenting) {
           camera.aspect = window.innerWidth / window.innerHeight;
           camera.updateProjectionMatrix();
           renderer.setSize(window.innerWidth, window.innerHeight);
+          console.log('Resized non-XR canvas.');
         }
       }
       function onSelect(event) {
+        console.log('Select event detected.');
         if (hitTestSourceRequested && hitTestSource) {
           shouldPlaceMarker = true;
+          console.log("Flag 'shouldPlaceMarker' set to true.");
         } else {
+          console.warn(
+            'Tap detected, but hit testing is not available or ready.'
+          );
+          // Provide feedback only if session is active but hit test failed setup
           if (renderer.xr.isPresenting) {
             infoDivElement.textContent =
               'Hit testing not available. Cannot place point.';
@@ -408,57 +413,58 @@
         }
       }
 
-      // --- Render Loop --- (Unchanged)
-      function renderFrame(timestamp, frame) {
-        /* ... logic ... */
-      }
-
-      // --- Helper Functions --- (Unchanged)
-      function placeMarker(pose) {
-        /* ... logic ... */
-      }
-      function updateMeasurementDisplay() {
-        /* ... logic ... */
-      }
-
-      // --- Start the application --- (Unchanged)
-      document.addEventListener('DOMContentLoaded', () => {
-        console.log('Event: DOMContentLoaded fired.');
-        init();
-      });
-      console.log(
-        '--- JavaScript module execution finished (event listener attached) ---'
-      );
-
-      // --- MINOR renderFrame / placeMarker / updateMeasurementDisplay logic (Unchanged from last full code) ---
+      // --- Render Loop ---
       function renderFrame(timestamp, frame) {
         if (!frame || !renderer.xr.isPresenting || !referenceSpace) {
           return;
         }
-        const session = frame.session;
+        // Get viewer pose relative to the established reference space
+        // const viewerPose = frame.getViewerPose(referenceSpace); // Needed if manually positioning camera
+
+        // THREE.js WebXRManager updates camera automatically when rendering
+
+        const session = frame.session; // Get session from frame
+
+        // --- Hit Testing ---
         let hitPose = null;
         if (hitTestSourceRequested && hitTestSource) {
           try {
             const hitTestResults = frame.getHitTestResults(hitTestSource);
             if (hitTestResults.length > 0) {
-              hitPose = hitTestResults[0].getPose(referenceSpace);
+              const hit = hitTestResults[0];
+              // Get pose relative to the *active* reference space ('local' or 'local-floor')
+              hitPose = hit.getPose(referenceSpace);
             }
-          } catch (error) {} // Ignore hit test errors for now
+          } catch (error) {
+            // This can happen if tracking is temporarily lost
+            // console.error("Error during hit test:", error); // Reduce log spam
+          }
         }
+
+        // --- Marker Placement ---
         if (shouldPlaceMarker) {
           if (hitPose) {
+            // console.log("Placing marker based on valid hit pose."); // Reduce log spam
             placeMarker(hitPose);
+          } else {
+            // console.warn("Tap processed, but no valid hit pose found on a surface this frame."); // Reduce log spam
+            // Provide feedback? Only if actively placing points.
           }
-          shouldPlaceMarker = false;
+          shouldPlaceMarker = false; // Reset flag after processing attempt
         }
+
+        // --- Render scene ---
         try {
           renderer.render(scene, camera);
         } catch (error) {
           console.error('Error during rendering:', error);
+          // Consider stopping loop/session if critical render error occurs
         }
       }
+
+      // --- Helper Functions ---
       function placeMarker(pose) {
-        const markerGeometry = new THREE.SphereGeometry(0.03, 16, 16);
+        const markerGeometry = new THREE.SphereGeometry(0.03, 16, 16); // Small sphere
         const markerMaterial = new THREE.MeshStandardMaterial({
           color: 0xff4444,
           roughness: 0.5,
@@ -477,6 +483,7 @@
         const point = new THREE.Vector3();
         point.setFromMatrixPosition(marker.matrix);
         measurementPoints.push(point);
+        // console.log("Placed marker at world coords:", point.x.toFixed(3), point.y.toFixed(3), point.z.toFixed(3)); // Reduce log spam
         updateMeasurementDisplay();
       }
       function updateMeasurementDisplay() {
@@ -487,11 +494,27 @@
           infoDivElement.textContent = `Last segment: ${distance.toFixed(
             3
           )} m. Tap for next point.`;
+          // console.log(`Distance between last two points: ${distance.toFixed(3)} m`); // Reduce log spam
         } else if (measurementPoints.length === 1) {
           infoDivElement.textContent =
             'First point placed. Tap surface again to measure distance.';
         }
       }
+
+      // --- Start the application ---
+      // Wait for the DOM to be fully loaded before running init
+      document.addEventListener('DOMContentLoaded', () => {
+        console.log('Event: DOMContentLoaded fired.');
+        init();
+      });
+
+      console.log(
+        '--- JavaScript module execution finished (event listener attached) ---'
+      );
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+    <script>
+      eruda.init();
     </script>
   </body>
 </html>
