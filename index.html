@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, user-scalable=no"
     />
-    <title>WebXR Core Test + Min GL Layer</title>
+    <title>WebXR Core Test + Min GL Layer (Corrected)</title>
     <style>
       /* CSS styles remain the same */
       body {
@@ -54,7 +54,6 @@
       #start-ar-button:hover:not(:disabled) {
         background-color: #0056b3;
       }
-      /* *** ADD CANVAS STYLE *** */
       canvas {
         display: block;
         position: absolute;
@@ -72,10 +71,12 @@
     <canvas id="webgl-canvas"></canvas>
 
     <script type="module">
-      console.log('--- JavaScript module execution started (Min WebGL) ---');
+      console.log(
+        '--- JavaScript module execution started (Min WebGL - Corrected) ---'
+      );
 
       // --- Relevant Context ---
-      // Current time: Friday, March 28, 2025 at 6:29 PM
+      // Current time: Friday, March 28, 2025 at 6:33 PM
       // Location: Kochi, Kerala, India
 
       // Global variables
@@ -92,9 +93,10 @@
       // Get UI elements & Canvas
       const infoDivElement = document.getElementById('info');
       const startButtonElement = document.getElementById('start-ar-button');
-      const canvasElement = document.getElementById('webgl-canvas'); // Get canvas
+      const canvasElement = document.getElementById('webgl-canvas');
 
-      // --- Initialization ---
+      // --- Function Definitions (Defined ONCE) ---
+
       function init() {
         console.log('init() called');
         if (!infoDivElement || !startButtonElement || !canvasElement) {
@@ -102,12 +104,8 @@
           alert('Error: UI element not found.');
           return;
         }
-
         infoDivElement.textContent = 'Setting up WebGL...';
-
-        // --- Minimal WebGL Context Setup ---
         try {
-          // Try for WebGL2, fallback to WebGL1
           gl = canvasElement.getContext('webgl2', { xrCompatible: true });
           if (!gl) {
             console.log('WebGL2 not supported, trying WebGL1');
@@ -119,9 +117,7 @@
             );
           }
           console.log('WebGL context obtained successfully (xrCompatible).');
-
-          // Basic GL setup (optional but good practice)
-          gl.clearColor(0.0, 0.0, 0.0, 0.0); // Transparent black
+          gl.clearColor(0.0, 0.0, 0.0, 0.0);
           gl.enable(gl.DEPTH_TEST);
           gl.enable(gl.BLEND);
           gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -130,176 +126,13 @@
           infoDivElement.textContent =
             'Error initializing WebGL: ' + error.message;
           displayCompatibilityError('WebGL initialization failed.');
-          return; // Stop if WebGL fails
+          return;
         }
-
         infoDivElement.textContent = 'Checking WebXR support...';
         checkXRSupport();
         window.addEventListener('resize', onWindowResize, false);
       }
 
-      // --- WebXR Support Check --- (Unchanged logic)
-      async function checkXRSupport() {
-        /* ... same as before ... */
-      }
-      function displayCompatibilityError(message) {
-        console.error('Compatibility Error:', message);
-        startButtonElement.disabled = true;
-      }
-
-      // --- WebXR Session Management ---
-      async function startARSession() {
-        /* ... same as before ... */
-      }
-
-      async function onSessionStarted(session) {
-        infoDivElement.textContent =
-          'AR Session Active. Configuring render state...';
-        console.log('onSessionStarted called.');
-        session.addEventListener('end', onSessionEnded);
-        session.addEventListener('select', onSelect);
-        console.log("'select' event listener added.");
-
-        // --- ** Link WebGL context to WebXR session ** ---
-        if (!gl) {
-          console.error('WebGL context is missing!');
-          infoDivElement.textContent = 'Error: WebGL context lost.';
-          try {
-            await session.end();
-          } catch (e) {}
-          return;
-        }
-        try {
-          console.log('Attempting to create XRWebGLLayer...');
-          xrWebGLLayer = new XRWebGLLayer(session, gl);
-          console.log('XRWebGLLayer created.');
-
-          console.log('Attempting session.updateRenderState...');
-          // Set the layer as the source for composition
-          await session.updateRenderState({ baseLayer: xrWebGLLayer });
-          console.log('Session render state updated with baseLayer.');
-
-          // Adjust canvas size to match XR layer (important!)
-          canvasElement.width = xrWebGLLayer.framebufferWidth;
-          canvasElement.height = xrWebGLLayer.framebufferHeight;
-          console.log(
-            'Canvas resized to XR framebuffer:',
-            canvasElement.width,
-            'x',
-            canvasElement.height
-          );
-        } catch (error) {
-          console.error(
-            'Error setting up XRWebGLLayer or Render State:',
-            error
-          );
-          infoDivElement.textContent =
-            'Error setting up WebGL layer for AR: ' + error.message;
-          try {
-            await session.end();
-          } catch (e) {}
-          return;
-        }
-        // --- End WebGL Linking ---
-
-        // --- Request Reference Space --- (Unchanged logic)
-        /* ... same as before ... */
-
-        // --- Request Hit Test Source --- (Unchanged logic)
-        /* ... same as before ... */
-
-        // --- Start Frame Loop ---
-        if (referenceSpace) {
-          xrFrameLoopActive = true;
-          session.requestAnimationFrame(onXRFrame);
-          console.log('XR Frame Loop started.');
-        } else {
-          console.error('Cannot start frame loop without referenceSpace.');
-        }
-      }
-
-      function onSessionEnded(/*event*/) {
-        /* ... same cleanup as before ... */
-      }
-
-      // --- Event Handlers ---
-      function onWindowResize() {
-        /* Can be empty for now */
-      }
-      function onSelect(event) {
-        /* ... same as before ... */
-      }
-
-      // --- XR Frame Loop ---
-      function onXRFrame(timestamp, frame) {
-        if (!currentSession || !xrFrameLoopActive) {
-          console.log('Exiting frame loop.');
-          return;
-        }
-
-        session = frame.session; // Get session from frame
-        session.requestAnimationFrame(onXRFrame); // Re-queue next frame
-
-        // --- ** Prepare GL for drawing to the XR Layer ** ---
-        if (!xrWebGLLayer || !gl) {
-          console.error('Missing GL or Layer in frame loop');
-          return;
-        }
-        try {
-          // Bind the framebuffer provided by the XR session's layer
-          gl.bindFramebuffer(gl.FRAMEBUFFER, xrWebGLLayer.framebuffer);
-
-          // Get the viewport for this frame (can change if rendering per-eye)
-          // For inline/magic window AR, there's usually one view
-          const pose = frame.getViewerPose(referenceSpace);
-          if (pose) {
-            // Typically iterate through pose.views here
-            for (const view of pose.views) {
-              const viewport = xrWebGLLayer.getViewport(view);
-              if (!viewport) continue; // Skip if viewport is invalid
-
-              // Set the WebGL viewport to match the XR view
-              gl.viewport(
-                viewport.x,
-                viewport.y,
-                viewport.width,
-                viewport.height
-              );
-
-              // ** Clear the viewport **
-              // Although we draw nothing, clearing ensures the compositor gets updated
-              // Use transparent black (0,0,0,0) so camera shows through
-              gl.clearColor(0, 0, 0, 0);
-              gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-              // *** If we WERE drawing, it would happen here, using view.projectionMatrix and view.transform ***
-            }
-          } else {
-            // console.warn("No viewer pose this frame."); // Can happen
-            // Still might need to clear if layer exists? Let's clear outside pose check just in case.
-            // gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-          }
-        } catch (error) {
-          console.error('Error during GL preparation in frame loop:', error);
-          // Consider stopping loop if errors persist
-        }
-        // --- End GL Prep ---
-
-        // --- Handle Hit Testing --- (Unchanged logic)
-        /* ... same as before ... */
-
-        // --- Process Pending Select Event --- (Unchanged logic)
-        /* ... same as before ... */
-      }
-
-      // --- Start the application ---
-      document.addEventListener('DOMContentLoaded', () => {
-        console.log('Event: DOMContentLoaded fired.');
-        init();
-      });
-      console.log('--- JavaScript module execution finished (Min WebGL) ---');
-
-      // --- Unchanged/Previously Omitted Functions (for completeness) ---
       async function checkXRSupport() {
         console.log('checkXRSupport() called.');
         infoDivElement.textContent = 'Checking WebXR capabilities...';
@@ -351,6 +184,12 @@
           displayCompatibilityError('WebXR API not available.');
         }
       }
+
+      function displayCompatibilityError(message) {
+        console.error('Compatibility Error:', message);
+        startButtonElement.disabled = true;
+      }
+
       async function startARSession() {
         infoDivElement.textContent = 'Starting AR session...';
         startButtonElement.disabled = true;
@@ -378,30 +217,180 @@
           startButtonElement.disabled = false;
         }
       }
-      async function onSessionEnded(/*event*/) {
+
+      async function onSessionStarted(session) {
+        infoDivElement.textContent =
+          'AR Session Active. Configuring render state...';
+        console.log('onSessionStarted called.');
+        session.addEventListener('end', onSessionEnded);
+        session.addEventListener('select', onSelect);
+        console.log("'select' event listener added.");
+
+        if (!gl) {
+          console.error('WebGL context is missing!');
+          infoDivElement.textContent = 'Error: WebGL context lost.';
+          try {
+            await session.end();
+          } catch (e) {}
+          return;
+        }
+        try {
+          console.log('Attempting to create XRWebGLLayer...');
+          xrWebGLLayer = new XRWebGLLayer(session, gl);
+          console.log('XRWebGLLayer created.');
+          console.log('Attempting session.updateRenderState...');
+          await session.updateRenderState({ baseLayer: xrWebGLLayer });
+          console.log('Session render state updated with baseLayer.');
+          canvasElement.width = xrWebGLLayer.framebufferWidth;
+          canvasElement.height = xrWebGLLayer.framebufferHeight;
+          console.log(
+            'Canvas resized to XR framebuffer:',
+            canvasElement.width,
+            'x',
+            canvasElement.height
+          );
+        } catch (error) {
+          console.error(
+            'Error setting up XRWebGLLayer or Render State:',
+            error
+          );
+          infoDivElement.textContent =
+            'Error setting up WebGL layer: ' + error.message;
+          try {
+            await session.end();
+          } catch (e) {}
+          return;
+        }
+
+        referenceSpace = null;
+        let referenceSpaceType = 'unknown';
+        try {
+          console.log("Attempting to request reference space: 'local'");
+          referenceSpace = await session.requestReferenceSpace('local');
+          referenceSpaceType = 'local';
+          console.log("Successfully obtained reference space: 'local'");
+        } catch (localError) {
+          console.warn(
+            `Failed to get 'local' ref space: ${localError.message}. Trying 'local-floor'.`
+          );
+          infoDivElement.textContent = "Trying 'local-floor' space...";
+          try {
+            console.log("Attempting reference space: 'local-floor'");
+            referenceSpace = await session.requestReferenceSpace('local-floor');
+            referenceSpaceType = 'local-floor';
+            console.log("Successfully obtained reference space: 'local-floor'");
+          } catch (floorError) {
+            console.error(
+              `Failed to get 'local-floor' ref space: ${floorError.message}.`
+            );
+            infoDivElement.textContent = `Error: No suitable ref space: ${floorError.message}`;
+            try {
+              await session.end();
+            } catch (e) {}
+            return;
+          }
+        }
+        if (!referenceSpace) {
+          console.error('Ref space null after attempts.');
+          infoDivElement.textContent = 'Fatal Error: No coordinate system.';
+          try {
+            await session.end();
+          } catch (e) {}
+          return;
+        }
+        infoDivElement.textContent = `Using '${referenceSpaceType}' space. Setting up hit test...`;
+
+        hitTestSource = null;
+        hitTestSourceRequested = false;
+        try {
+          console.log("Attempting 'viewer' space for hit test setup");
+          const viewerSpace = await session.requestReferenceSpace('viewer');
+          console.log("Got 'viewer' space.");
+          console.log('Attempting hit test source...');
+          hitTestSource = await session.requestHitTestSource({
+            space: viewerSpace,
+          });
+          hitTestSourceRequested = true;
+          console.log('Hit test source obtained successfully.');
+          infoDivElement.textContent =
+            'AR Ready. Point at surface & tap to log hit pose.';
+        } catch (err) {
+          console.error(`Error during hit test setup: ${err.message}`);
+          infoDivElement.textContent = `Using '${referenceSpaceType}' space, but Hit-Test setup failed: ${err.message}`;
+          hitTestSourceRequested = false;
+          console.warn('Proceeding without hit testing.');
+        }
+
+        if (referenceSpace) {
+          xrFrameLoopActive = true;
+          session.requestAnimationFrame(onXRFrame);
+          console.log('XR Frame Loop started.');
+        } else {
+          console.error('Cannot start frame loop without referenceSpace.');
+        }
+      }
+
+      function onSessionEnded(/*event*/) {
         console.log('onSessionEnded called.');
         xrFrameLoopActive = false;
-        currentSession?.removeEventListener('select', onSelect); // Use optional chaining
+        currentSession?.removeEventListener('select', onSelect);
         currentSession = null;
         hitTestSourceRequested = false;
         hitTestSource = null;
         referenceSpace = null;
-        xrWebGLLayer = null; // Clear GL layer ref
+        xrWebGLLayer = null;
         infoDivElement.textContent =
           'AR Session ended. Click Start to begin again.';
         startButtonElement.style.display = 'block';
         startButtonElement.disabled = false;
         console.log('AR Session Ended.');
-        // Reset canvas size? Optional.
-        // canvasElement.width = canvasElement.clientWidth * window.devicePixelRatio;
-        // canvasElement.height = canvasElement.clientHeight * window.devicePixelRatio;
       }
+
+      function onWindowResize() {
+        /* Can be empty for now */
+      }
+
       function onSelect(event) {
         console.log('Select event detected on session.');
-        selectEventPending = true; /* infoDivElement.textContent = 'Tap registered!'; */
-      } // Removed UI update here
-      // Frame Loop Logic for hit test and select processing
-      function processFrameHitsAndSelect(frame) {
+        selectEventPending = true;
+      }
+
+      function onXRFrame(timestamp, frame) {
+        if (!currentSession || !xrFrameLoopActive) {
+          console.log('Exiting frame loop.');
+          return;
+        }
+        let session = frame.session;
+        session.requestAnimationFrame(onXRFrame); // Use let or const
+
+        // --- GL Prep ---
+        if (gl && xrWebGLLayer) {
+          try {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, xrWebGLLayer.framebuffer);
+            const pose = frame.getViewerPose(referenceSpace);
+            if (pose) {
+              for (const view of pose.views) {
+                const viewport = xrWebGLLayer.getViewport(view);
+                if (!viewport) continue;
+                gl.viewport(
+                  viewport.x,
+                  viewport.y,
+                  viewport.width,
+                  viewport.height
+                );
+                gl.clearColor(0, 0, 0, 0);
+                gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+              }
+            } else {
+              // Optional clear if pose lost? Usually handled by layer.
+              // gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            }
+          } catch (error) {
+            console.error('Error during GL prep in frame loop:', error);
+          }
+        }
+
+        // --- Hit Test / Select Logic ---
         latestHitPoseMatrix = null;
         if (hitTestSourceRequested && hitTestSource && referenceSpace) {
           try {
@@ -433,36 +422,15 @@
           selectEventPending = false;
         }
       }
-      // Add call inside onXRFrame:
-      function onXRFrame(timestamp, frame) {
-        /* ... session active check ... */
-        session = frame.session;
-        session.requestAnimationFrame(onXRFrame);
-        /* ... GL preparation ... */
-        if (gl && xrWebGLLayer) {
-          /* ... bind framebuffer, clear buffer ... */
-          gl.bindFramebuffer(gl.FRAMEBUFFER, xrWebGLLayer.framebuffer);
-          const pose = frame.getViewerPose(referenceSpace);
-          if (pose) {
-            for (const view of pose.views) {
-              const viewport = xrWebGLLayer.getViewport(view);
-              if (!viewport) continue;
-              gl.viewport(
-                viewport.x,
-                viewport.y,
-                viewport.width,
-                viewport.height
-              );
-              gl.clearColor(0, 0, 0, 0);
-              gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-            }
-          } else {
-            // Fallback clear if pose lost? Might not be needed if layer handles it.
-            // gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-          }
-        }
-        processFrameHitsAndSelect(frame); // Call hit test/select logic
-      }
+
+      // --- Start the application ---
+      document.addEventListener('DOMContentLoaded', () => {
+        console.log('Event: DOMContentLoaded fired.');
+        init();
+      });
+      console.log(
+        '--- JavaScript module execution finished (Min WebGL - Corrected) ---'
+      );
     </script>
     <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
     <script>
