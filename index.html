@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <title>WebXR Measurement Test (Debug Log v2)</title>
+    <style>
+      /* CSS styles remain the same as before */
+      body {
+        margin: 0;
+        overflow: hidden;
+        font-family: sans-serif;
+        background-color: #000;
+      }
+      #info {
+        position: absolute;
+        top: 10px;
+        width: 100%;
+        text-align: center;
+        z-index: 100;
+        display: block;
+        color: white;
+        background-color: rgba(0, 0, 0, 0.7);
+        padding: 10px;
+        font-size: 16px;
+        box-sizing: border-box;
+      }
+      #start-ar-button {
+        position: absolute;
+        bottom: 30px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 14px 28px;
+        font-size: 18px;
+        background-color: #007bff;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        z-index: 101;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        transition: background-color 0.3s ease;
+      }
+      #start-ar-button:disabled {
+        background-color: #555;
+        color: #aaa;
+        cursor: not-allowed;
+        box-shadow: none;
+      }
+      #start-ar-button:hover:not(:disabled) {
+        background-color: #0056b3;
+      }
+      canvas {
+        display: block;
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 1;
+      }
+    </style>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="info">Initializing...</div>
+    <button id="start-ar-button" disabled>Start AR Measurement</button>
+    <script type="module">
+      // VERY FIRST SCRIPT LOG
+      console.log('--- JavaScript module execution started ---');
+
+      import * as THREE from 'three';
+
+      // Log successful import
+      console.log(
+        'Three.js module imported successfully:',
+        THREE ? 'Yes' : 'No'
+      );
+
+      // Global variables
+      let camera, scene, renderer;
+      let controller;
+      let hitTestSource = null;
+      let hitTestSourceRequested = false;
+      let markers = [];
+      let measurementPoints = [];
+      let currentSession = null;
+      let referenceSpace = null;
+      let shouldPlaceMarker = false;
+
+      // Get elements *outside* init, but check they exist *inside* init or DOMContentLoaded
+      const infoDivElement = document.getElementById('info');
+      const startButtonElement = document.getElementById('start-ar-button');
+
+      // --- Initialization ---
+      function init() {
+        console.log('init() called');
+        // Check if elements were found before trying to use them
+        if (!infoDivElement) {
+          console.error('FATAL: infoDivElement not found!');
+          alert("Error: UI element 'info' not found."); // Use alert for critical errors
+          return;
+        }
+        if (!startButtonElement) {
+          console.error('FATAL: startButtonElement not found!');
+          alert("Error: UI element 'start-ar-button' not found.");
+          return;
+        }
+
+        infoDivElement.textContent = 'Setting up 3D scene...';
+
+        // Rest of the init function... (Scene, Camera, Renderer setup)
+        try {
+          scene = new THREE.Scene();
+          camera = new THREE.PerspectiveCamera(
+            70,
+            window.innerWidth / window.innerHeight,
+            0.01,
+            40
+          );
+
+          renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+          renderer.setPixelRatio(window.devicePixelRatio);
+          renderer.setSize(window.innerWidth, window.innerHeight);
+          renderer.xr.enabled = true;
+          document.body.appendChild(renderer.domElement);
+          console.log('Three.js Renderer initialized, XR enabled.');
+
+          const light = new THREE.AmbientLight(0xffffff, 1.2);
+          scene.add(light);
+          const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
+          directionalLight.position.set(1, 1, 1);
+          scene.add(directionalLight);
+
+          controller = renderer.xr.getController(0);
+          controller.addEventListener('select', onSelect);
+          scene.add(controller);
+
+          window.addEventListener('resize', onWindowResize, false);
+
+          // Proceed to check XR support
+          checkXRSupport();
+        } catch (error) {
+          console.error('Error during Three.js setup:', error);
+          infoDivElement.textContent =
+            'Error initializing 3D scene: ' + error.message;
+          alert('Error initializing 3D scene: ' + error.message); // Make critical errors visible
+        }
+      }
+
+      // --- WebXR Support Check --- (Keep the detailed logging from previous version)
+      async function checkXRSupport() {
+        console.log('checkXRSupport() called.');
+        infoDivElement.textContent = 'Checking WebXR capabilities...';
+        console.log('navigator.xr:', navigator.xr);
+
+        if ('xr' in navigator && navigator.xr) {
+          console.log('navigator.xr exists. Checking session support...');
+          infoDivElement.textContent = 'Checking for immersive-ar support...';
+          try {
+            const basicSupport = await navigator.xr.isSessionSupported(
+              'immersive-ar'
+            );
+            console.log(`Basic 'immersive-ar' supported: ${basicSupport}`);
+            if (basicSupport) {
+              infoDivElement.textContent = 'Checking for hit-test feature...';
+              console.log('Checking support for immersive-ar WITH hit-test...');
+              const featureSupport = await navigator.xr.isSessionSupported(
+                'immersive-ar',
+                { requiredFeatures: ['hit-test'] }
+              );
+              console.log(
+                `'immersive-ar' with 'hit-test' supported: ${featureSupport}`
+              );
+              if (featureSupport) {
+                infoDivElement.textContent = 'Ready! Click "Start AR"';
+                startButtonElement.disabled = false;
+                startButtonElement.addEventListener('click', startARSession);
+                console.log('AR Button enabled.');
+              } else {
+                infoDivElement.textContent =
+                  'AR supported, but Hit Test feature is not. Measurement disabled.';
+                console.error('Hit-test feature not supported.');
+                displayCompatibilityError('Hit-test feature not supported.');
+              }
+            } else {
+              infoDivElement.textContent =
+                'Immersive AR mode not supported on this device/browser.';
+              console.error('Basic immersive-ar not supported.');
+              displayCompatibilityError('Immersive AR mode not supported.');
+            }
+          } catch (err) {
+            infoDivElement.textContent =
+              'Error during WebXR support check: ' + err.message;
+            console.error('Error calling isSessionSupported:', err);
+            displayCompatibilityError(err.message);
+          }
+        } else {
+          infoDivElement.textContent =
+            'WebXR API not found. Use a compatible browser.';
+          console.error('navigator.xr object not found.');
+          displayCompatibilityError('WebXR API not available.');
+        }
+      }
+
+      function displayCompatibilityError(message) {
+        console.error('Compatibility Error:', message);
+        startButtonElement.disabled = true;
+      }
+
+      // --- WebXR Session Management ---
+      // (startARSession, onSessionStarted, onSessionEnded functions remain the same)
+      async function startARSession() {
+        infoDivElement.textContent = 'Starting AR session...';
+        startButtonElement.disabled = true;
+        startButtonElement.style.display = 'none';
+        console.log('Attempting to start AR session...');
+
+        if (currentSession) {
+          console.warn('Session already active? Ending previous.');
+          try {
+            await currentSession.end();
+          } catch (e) {
+            console.error('Error ending previous session:', e);
+          }
+          currentSession = null;
+        }
+
+        try {
+          currentSession = await navigator.xr.requestSession('immersive-ar', {
+            requiredFeatures: ['hit-test'],
+          });
+          console.log('navigator.xr.requestSession succeeded.');
+          onSessionStarted(currentSession);
+        } catch (error) {
+          console.error('Failed to start AR session:', error);
+          infoDivElement.textContent = `Failed to start AR: ${error.message}. Please grant permissions.`;
+          startButtonElement.style.display = 'block';
+          startButtonElement.disabled = false; // Consider keeping disabled if error is fatal
+        }
+      }
+
+      async function onSessionStarted(session) {
+        infoDivElement.textContent =
+          'AR Session Active. Point at a surface and tap.';
+        console.log('onSessionStarted called.');
+        session.addEventListener('end', onSessionEnded);
+
+        try {
+          await renderer.xr.setSession(session);
+          console.log('Three.js renderer XR session set.');
+        } catch (err) {
+          console.error('Error setting renderer XR session:', err);
+          infoDivElement.textContent = 'Error linking session to renderer.';
+          try {
+            await session.end();
+          } catch (e) {}
+          return;
+        }
+
+        try {
+          referenceSpace = await session.requestReferenceSpace('local');
+          console.log("'local' reference space obtained.");
+        } catch (err) {
+          console.error("Could not get 'local' reference space:", err);
+          infoDivElement.textContent = 'Error getting reference space.';
+          try {
+            await session.end();
+          } catch (e) {}
+          return;
+        }
+
+        try {
+          const viewerSpace = await session.requestReferenceSpace('viewer');
+          hitTestSource = await session.requestHitTestSource({
+            space: viewerSpace,
+          });
+          hitTestSourceRequested = true;
+          console.log("Hit test source obtained using 'viewer' space.");
+        } catch (err) {
+          console.error('Could not get hit test source:', err);
+          infoDivElement.textContent =
+            'Could not start hit testing. Measurement disabled.';
+          hitTestSourceRequested = false;
+        }
+
+        try {
+          renderer.setAnimationLoop(renderFrame);
+          console.log('Render loop started.');
+        } catch (err) {
+          console.error('Error starting animation loop:', err);
+          infoDivElement.textContent = 'Error starting rendering.';
+          try {
+            await session.end();
+          } catch (e) {}
+        }
+      }
+
+      function onSessionEnded(/*event*/) {
+        currentSession = null;
+        hitTestSourceRequested = false;
+        hitTestSource = null;
+        referenceSpace = null;
+        markers.forEach((marker) => scene.remove(marker));
+        markers = [];
+        measurementPoints = [];
+        infoDivElement.textContent =
+          'AR Session ended. Click Start to begin again.';
+        startButtonElement.style.display = 'block';
+        startButtonElement.disabled = false;
+        renderer.setAnimationLoop(null);
+        console.log('AR Session Ended, render loop stopped.');
+      }
+
+      // --- Event Handlers ---
+      // (onWindowResize, onSelect functions remain the same)
+      function onWindowResize() {
+        console.log('Window resized.');
+        if (!renderer.xr.isPresenting) {
+          camera.aspect = window.innerWidth / window.innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(window.innerWidth, window.innerHeight);
+          console.log('Resized non-XR canvas.');
+        }
+      }
+      function onSelect(event) {
+        console.log('Select event detected.');
+        if (hitTestSourceRequested && hitTestSource) {
+          shouldPlaceMarker = true;
+          console.log("Flag 'shouldPlaceMarker' set to true.");
+        } else {
+          console.warn(
+            'Tap detected, but hit testing is not available or ready.'
+          );
+          infoDivElement.textContent =
+            'Hit testing not ready. Cannot place point.';
+        }
+      }
+
+      // --- Render Loop ---
+      // (renderFrame function remains the same)
+      function renderFrame(timestamp, frame) {
+        if (!frame || !renderer.xr.isPresenting || !referenceSpace) {
+          return;
+        }
+        const session = frame.session;
+        let hitPose = null;
+        if (hitTestSourceRequested && hitTestSource) {
+          try {
+            const hitTestResults = frame.getHitTestResults(hitTestSource);
+            if (hitTestResults.length > 0) {
+              hitPose = hitTestResults[0].getPose(referenceSpace);
+            }
+          } catch (error) {
+            console.error('Error during hit test:', error);
+          }
+        }
+        if (shouldPlaceMarker) {
+          if (hitPose) {
+            console.log('Placing marker based on valid hit pose.');
+            placeMarker(hitPose);
+          } else {
+            console.warn(
+              'Tap processed, but no valid hit pose found on a surface this frame.'
+            );
+          }
+          shouldPlaceMarker = false;
+        }
+        try {
+          renderer.render(scene, camera);
+        } catch (error) {
+          console.error('Error during rendering:', error);
+        }
+      }
+
+      // --- Helper Functions ---
+      // (placeMarker, updateMeasurementDisplay functions remain the same)
+      function placeMarker(pose) {
+        const markerGeometry = new THREE.SphereGeometry(0.03, 16, 16);
+        const markerMaterial = new THREE.MeshStandardMaterial({
+          color: 0xff4444,
+          roughness: 0.5,
+          metalness: 0.2,
+        });
+        const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+        marker.matrix.fromArray(pose.transform.matrix);
+        marker.matrix.decompose(
+          marker.position,
+          marker.quaternion,
+          marker.scale
+        );
+        marker.scale.set(1, 1, 1);
+        scene.add(marker);
+        markers.push(marker);
+        const point = new THREE.Vector3();
+        point.setFromMatrixPosition(marker.matrix);
+        measurementPoints.push(point);
+        console.log(
+          'Placed marker at world coords:',
+          point.x.toFixed(3),
+          point.y.toFixed(3),
+          point.z.toFixed(3)
+        );
+        updateMeasurementDisplay();
+      }
+      function updateMeasurementDisplay() {
+        if (measurementPoints.length >= 2) {
+          const p1 = measurementPoints[measurementPoints.length - 2];
+          const p2 = measurementPoints[measurementPoints.length - 1];
+          const distance = p1.distanceTo(p2);
+          infoDivElement.textContent = `Last segment: ${distance.toFixed(
+            3
+          )} m. Tap for next point.`;
+          console.log(
+            `Distance between last two points: ${distance.toFixed(3)} m`
+          );
+        } else if (measurementPoints.length === 1) {
+          infoDivElement.textContent =
+            'First point placed. Tap surface again to measure distance.';
+        }
+      }
+
+      // --- Start the application ---
+      // Wait for the DOM to be fully loaded before running init
+      document.addEventListener('DOMContentLoaded', () => {
+        console.log('Event: DOMContentLoaded fired.'); // DEBUG LOG
+        init();
+      });
+
+      console.log(
+        '--- JavaScript module execution finished (event listener attached) ---'
+      ); // DEBUG LOG
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+    <script>
+      eruda.init();
+    </script>
+  </body>
+</html>
