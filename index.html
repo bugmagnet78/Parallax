@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, user-scalable=no"
     />
-    <title>WebXR Measurement - Three.js (RefSpace Fix)</title>
+    <title>WebXR Measurement - Three.js (Local Hint Test)</title>
     <style>
       /* CSS styles */
       body {
@@ -80,7 +80,9 @@
     <canvas id="webgl-canvas"></canvas>
 
     <script type="module">
-      console.log('--- JavaScript module execution started (RefSpace Fix) ---');
+      console.log(
+        '--- JavaScript module execution started (Local Hint Test) ---'
+      );
 
       import * as THREE from 'three';
 
@@ -90,15 +92,15 @@
       );
 
       // --- Relevant Context ---
-      // Current time: Friday, March 28, 2025 at 9:55 PM
+      // Current time: Friday, March 28, 2025 at 10:05 PM
       // Location: Kochi, Kerala, India
 
       // Global variables
-      let camera, scene, renderer; // Three.js objects
+      let camera, scene, renderer;
       let hitTestSource = null;
       let hitTestSourceRequested = false;
       let currentSession = null;
-      let referenceSpace = null; // Will be set by Three.js
+      let referenceSpace = null;
       let latestHitPoseMatrix = null;
       let selectEventPending = false;
       let placedMarkers = [];
@@ -109,6 +111,7 @@
 
       // --- Function Definitions (Defined ONCE) ---
 
+      // --- UPDATED init(): Remove antialias ---
       function init() {
         console.log('init() called');
         if (!infoDivElement || !startButtonElement || !canvasElement) {
@@ -125,15 +128,17 @@
             0.01,
             40
           );
+          // *** CHANGE: Removed antialias: true ***
           renderer = new THREE.WebGLRenderer({
             canvas: canvasElement,
-            antialias: true,
             alpha: true,
           });
           renderer.setPixelRatio(window.devicePixelRatio);
           renderer.setSize(window.innerWidth, window.innerHeight);
           renderer.xr.enabled = true; // Enable WebXR AFTER renderer setup
-          console.log('Three.js Renderer initialized, XR enabled.');
+          console.log(
+            'Three.js Renderer initialized (No Antialias), XR enabled.'
+          ); // Updated log
           const light = new THREE.AmbientLight(0xffffff, 1.0);
           scene.add(light);
           const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
@@ -151,7 +156,142 @@
       }
 
       async function checkXRSupport() {
-        // (Logic unchanged)
+        /* ... unchanged ... */
+      }
+      function displayCompatibilityError(message) {
+        /* ... unchanged ... */
+      }
+      async function startARSession() {
+        /* ... unchanged ... */
+      }
+
+      // --- UPDATED onSessionStarted: Change hint to 'local' ---
+      async function onSessionStarted(session) {
+        infoDivElement.textContent =
+          'AR Session Active. Configuring Renderer & Spaces...';
+        console.log('onSessionStarted called.');
+        session.addEventListener('end', onSessionEnded);
+        session.addEventListener('select', onSelect);
+        console.log("'select' event listener added.");
+
+        // --- ** CHANGE: Configure Three.js Reference Space Type hint to 'local' ** ---
+        try {
+          console.log(
+            "Setting Three.js reference space type hint to 'local'..."
+          ); // Changed hint
+          renderer.xr.setReferenceSpaceType('local'); // *** TRY 'local' ***
+          console.log("Reference space type hint set to 'local'."); // Changed log
+        } catch (err) {
+          console.error('Error setting reference space type hint:', err);
+          infoDivElement.textContent =
+            'Error configuring reference space hint.';
+          try {
+            await session.end();
+          } catch (e) {}
+          return;
+        }
+        // --- End Configuration Change ---
+
+        // --- CRITICAL STEP: Link session to Three.js Renderer ---
+        console.log('Attempting: await renderer.xr.setSession(session)...');
+        try {
+          await renderer.xr.setSession(session); // Will now use the 'local' hint
+          console.log('Successfully set renderer XR session.');
+        } catch (err) {
+          console.error('Error calling renderer.xr.setSession:', err);
+          console.log('Session object at error:', session);
+          console.log('renderer.xr object at error:', renderer.xr);
+          if (err.message.includes('reference space type')) {
+            infoDivElement.textContent = `Fatal: Could not get required ref space ('local' hint) via Three.js: ${err.message}`;
+          } // Updated msg
+          else {
+            infoDivElement.textContent =
+              'Fatal: Could not link session to renderer: ' + err.message;
+          }
+          try {
+            await session.end();
+          } catch (e) {}
+          return;
+        }
+
+        // --- Get the reference space Three.js established ---
+        referenceSpace = renderer.xr.getReferenceSpace();
+        if (!referenceSpace) {
+          console.error(
+            'Failed to get reference space from Three.js Manager after setSession.'
+          );
+          infoDivElement.textContent =
+            'Fatal: Failed coordinate system setup via Three.js.';
+          try {
+            await session.end();
+          } catch (e) {}
+          return;
+        }
+        let referenceSpaceType = 'unknown (from Three.js)';
+        console.log(
+          `Successfully using reference space from Three.js (requested 'local').`
+        ); // Updated log
+        infoDivElement.textContent = `Using main space. Setting up hit test...`;
+
+        // --- Request Hit Test Source (Logic Unchanged) ---
+        hitTestSource = null;
+        hitTestSourceRequested = false;
+        try {
+          console.log("Attempting 'viewer' space for hit test setup");
+          const viewerSpace = await session.requestReferenceSpace('viewer');
+          console.log("Got 'viewer' space for hit test setup.");
+          console.log('Attempting hit test source...');
+          hitTestSource = await session.requestHitTestSource({
+            space: viewerSpace,
+          });
+          hitTestSourceRequested = true;
+          console.log('Hit test source obtained successfully.');
+          infoDivElement.textContent =
+            'AR Ready. Point at surface & tap to place marker.';
+        } catch (err) {
+          console.error(`Error during hit test setup: ${err.message}`);
+          infoDivElement.textContent = `Main space OK, but Hit-Test setup failed: ${err.message}`;
+          hitTestSourceRequested = false;
+          console.warn('Proceeding without hit testing.');
+        }
+
+        // --- Start Render Loop (Logic Unchanged) ---
+        if (referenceSpace) {
+          renderer.setAnimationLoop(onXRFrame);
+          console.log('Three.js Render Loop started.');
+        } else {
+          console.error(
+            'Cannot start render loop without referenceSpace from Three.js.'
+          );
+        }
+      }
+      // --- END UPDATED onSessionStarted ---
+
+      function onSessionEnded(/*event*/) {
+        /* ... unchanged ... */
+      }
+      function onWindowResize() {
+        /* ... unchanged ... */
+      }
+      function onSelect(event) {
+        /* ... unchanged ... */
+      }
+      function onXRFrame(timestamp, frame) {
+        /* ... unchanged ... */
+      }
+      function placeMarker(matrixArray) {
+        /* ... unchanged ... */
+      }
+
+      // --- Start the application ---
+      document.addEventListener('DOMContentLoaded', () => {
+        console.log('DOM Ready.');
+        init();
+      });
+      console.log('--- JS module execution finished (Local Hint Test) ---');
+
+      // --- Unchanged Function Bodies (ensure they exist only once) ---
+      async function checkXRSupport() {
         console.log('checkXRSupport() called.');
         infoDivElement.textContent = 'Checking WebXR capabilities...';
         console.log('navigator.xr:', navigator.xr);
@@ -201,14 +341,11 @@
           displayCompatibilityError('WebXR API not available.');
         }
       }
-
       function displayCompatibilityError(message) {
         console.error('Compatibility Error:', message);
         startButtonElement.disabled = true;
       }
-
       async function startARSession() {
-        // (Logic unchanged)
         infoDivElement.textContent = 'Starting AR session...';
         startButtonElement.disabled = true;
         startButtonElement.style.display = 'none';
@@ -233,109 +370,7 @@
           startButtonElement.disabled = false;
         }
       }
-
-      // --- THIS IS THE CORRECTED onSessionStarted FUNCTION ---
-      async function onSessionStarted(session) {
-        infoDivElement.textContent =
-          'AR Session Active. Configuring Renderer & Spaces...';
-        console.log('onSessionStarted called.');
-        session.addEventListener('end', onSessionEnded);
-        session.addEventListener('select', onSelect);
-        console.log("'select' event listener added.");
-
-        // --- ** NEW: Configure Three.js Reference Space Type BEFORE setSession ** ---
-        try {
-          // We know 'local-floor' worked in manual tests, let's prioritize it.
-          console.log(
-            "Setting Three.js reference space type hint to 'local-floor'..."
-          );
-          renderer.xr.setReferenceSpaceType('local-floor');
-          console.log('Reference space type hint set.');
-        } catch (err) {
-          console.error('Error setting reference space type hint:', err);
-          infoDivElement.textContent =
-            'Error configuring reference space hint.';
-          try {
-            await session.end();
-          } catch (e) {}
-          return;
-        }
-        // --- End New Configuration ---
-
-        // --- CRITICAL STEP: Link session to Three.js Renderer ---
-        console.log('Attempting: await renderer.xr.setSession(session)...');
-        try {
-          await renderer.xr.setSession(session); // Uses the 'local-floor' hint
-          console.log('Successfully set renderer XR session.');
-        } catch (err) {
-          console.error('Error calling renderer.xr.setSession:', err);
-          console.log('Session object at error:', session);
-          console.log('renderer.xr object at error:', renderer.xr);
-          if (err.message.includes('reference space type')) {
-            infoDivElement.textContent =
-              'Fatal: Could not get required ref space via Three.js: ' +
-              err.message;
-          } else {
-            infoDivElement.textContent =
-              'Fatal: Could not link session to renderer: ' + err.message;
-          }
-          try {
-            await session.end();
-          } catch (e) {}
-          return;
-        }
-
-        // --- Get the reference space Three.js established ---
-        referenceSpace = renderer.xr.getReferenceSpace(); // Get space from Three.js
-        if (!referenceSpace) {
-          console.error('Failed to get reference space from Three.js Manager.');
-          infoDivElement.textContent =
-            'Fatal: Failed coordinate system setup via Three.js.';
-          try {
-            await session.end();
-          } catch (e) {}
-          return;
-        }
-        let referenceSpaceType = 'unknown (from Three.js)'; // .type not standard
-        console.log(`Successfully using reference space from Three.js.`);
-        infoDivElement.textContent = `Using main space. Setting up hit test...`; // Simplified msg
-
-        // --- Request Hit Test Source (Still needs 'viewer' space) ---
-        hitTestSource = null;
-        hitTestSourceRequested = false;
-        try {
-          console.log("Attempting 'viewer' space for hit test setup");
-          const viewerSpace = await session.requestReferenceSpace('viewer');
-          console.log("Got 'viewer' space for hit test setup.");
-          console.log('Attempting hit test source...');
-          hitTestSource = await session.requestHitTestSource({
-            space: viewerSpace,
-          });
-          hitTestSourceRequested = true;
-          console.log('Hit test source obtained successfully.');
-          infoDivElement.textContent =
-            'AR Ready. Point at surface & tap to place marker.';
-        } catch (err) {
-          console.error(`Error during hit test setup: ${err.message}`);
-          infoDivElement.textContent = `Main space OK, but Hit-Test setup failed: ${err.message}`;
-          hitTestSourceRequested = false;
-          console.warn('Proceeding without hit testing.');
-        }
-
-        // --- Start Render Loop using Three.js method ---
-        if (referenceSpace) {
-          renderer.setAnimationLoop(onXRFrame);
-          console.log('Three.js Render Loop started.');
-        } else {
-          console.error(
-            'Cannot start render loop without referenceSpace from Three.js.'
-          );
-        }
-      }
-      // --- END CORRECTED onSessionStarted ---
-
       function onSessionEnded(/*event*/) {
-        // (Logic unchanged)
         console.log('onSessionEnded called.');
         currentSession?.removeEventListener('select', onSelect);
         currentSession = null;
@@ -357,23 +392,18 @@
         startButtonElement.disabled = false;
         console.log('AR Session Ended.');
       }
-
       function onWindowResize() {
-        // (Logic unchanged)
         if (!renderer.xr.isPresenting) {
           camera.aspect = window.innerWidth / window.innerHeight;
           camera.updateProjectionMatrix();
           renderer.setSize(window.innerWidth, window.innerHeight);
         }
       }
-
       function onSelect(event) {
         console.log('Select event detected.');
         selectEventPending = true;
       }
-
       function onXRFrame(timestamp, frame) {
-        // (Logic unchanged)
         if (!frame) {
           return;
         }
@@ -389,7 +419,7 @@
               }
             }
           } catch (error) {
-            /* Ignore hit test error */
+            /* Ignore */
           }
         }
         if (selectEventPending) {
@@ -409,9 +439,7 @@
           console.error('Render error:', error);
         }
       }
-
       function placeMarker(matrixArray) {
-        // (Logic unchanged)
         const geometry = new THREE.SphereGeometry(0.02, 16, 16);
         const material = new THREE.MeshStandardMaterial({
           color: 0xff0000,
@@ -438,15 +466,8 @@
           infoDivElement.textContent = 'First marker placed. Tap again.';
         } else if (placedMarkers.length >= 2) {
           infoDivElement.textContent = `${placedMarkers.length} markers placed.`;
-        } // Update UI
+        }
       }
-
-      // --- Start the application ---
-      document.addEventListener('DOMContentLoaded', () => {
-        console.log('DOM Ready.');
-        init();
-      });
-      console.log('--- JS module execution finished (RefSpace Fix) ---');
     </script>
     <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
     <script>
