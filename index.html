@@ -519,138 +519,290 @@
 
       // --- onXRFrame - Render Loop ---
       // --- REVISED onXRFrame - More Logging ---
+      // --- REVISED onXRFrame with Entry Log and Error Catching ---
       function onXRFrame(timestamp, frame) {
+        // --- Log Entry ---
+        console.log(`onXRFrame called - Timestamp: ${timestamp}`);
+
+        // --- Basic Checks ---
         if (!frame) {
+          console.warn('onXRFrame: No frame provided!');
+          return; // Should not continue if frame is missing
+        }
+        if (!currentSession || !renderer.xr.isPresenting) {
+          console.warn(
+            'onXRFrame: Session ended or not presenting, stopping loop logic.'
+          );
+          // Although setAnimationLoop(null) should be called by onSessionEnded,
+          // explicitly returning here prevents errors if things are slightly out of sync.
           return;
         }
-        latestHitPoseMatrix = null; // Reset hit pose for this frame
 
-        // Get Hit Test Results (Unchanged)
-        if (hitTestSourceRequested && hitTestSource && referenceSpace) {
-          try {
-            const hitTestResults = frame.getHitTestResults(hitTestSource);
-            if (hitTestResults.length > 0) {
-              const hit = hitTestResults[0];
-              const hitPose = hit.getPose(referenceSpace);
-              if (hitPose) {
-                latestHitPoseMatrix = hitPose.transform.matrix;
+        // --- Main Frame Logic Wrapped in Try/Catch ---
+        try {
+          latestHitPoseMatrix = null; // Reset hit pose for this frame
+
+          // Get Hit Test Results
+          if (hitTestSourceRequested && hitTestSource && referenceSpace) {
+            try {
+              const hitTestResults = frame.getHitTestResults(hitTestSource);
+              if (hitTestResults.length > 0) {
+                const hit = hitTestResults[0];
+                const hitPose = hit.getPose(referenceSpace);
+                if (hitPose) {
+                  latestHitPoseMatrix = hitPose.transform.matrix;
+                }
               }
-            }
-          } catch (error) {
-            /* Ignore */
+            } catch (hitError) {
+              console.warn('Minor error during hit test:', hitError.message);
+            } // Log minor hit errors
           }
-        }
 
-        // Process Pending Select Event Based on State
-        if (selectEventPending) {
-          console.log(`DEBUG: Processing select in state: ${measurementState}`); // Log entry and state
-
-          if (latestHitPoseMatrix) {
-            console.log('DEBUG: Hit detected! Matrix available.'); // Log hit success
-
-            // Place a marker visually FIRST
-            console.log('DEBUG: Calling placeMarker...');
-            const markerPosition = placeMarker(latestHitPoseMatrix);
+          // Process Pending Select Event Based on State
+          if (selectEventPending) {
             console.log(
-              'DEBUG: placeMarker returned position:',
-              markerPosition
+              `DEBUG: Processing select in state: ${measurementState}`
             );
-
-            if (!markerPosition) {
-              console.error(
-                'DEBUG: placeMarker did not return a valid position!'
-              );
-              selectEventPending = false; // Reset flag even on error
-              return; // Stop processing this tap
-            }
-
-            // Store point based on current state
-            let pointStored = false;
-            let justCompleted = false; // Flag if measurement finished this tap
-
-            console.log('DEBUG: Entering state switch for:', measurementState);
-            switch (measurementState) {
-              case 'waiting_bl':
-                console.log('DEBUG: State matched: waiting_bl');
-                cornerPoints.bl = markerPosition;
-                measurementState = 'waiting_br';
-                pointStored = true;
-                break;
-              case 'waiting_br':
-                console.log('DEBUG: State matched: waiting_br');
-                cornerPoints.br = markerPosition;
-                measurementState = 'waiting_tl';
-                pointStored = true;
-                break;
-              case 'waiting_tl':
-                console.log('DEBUG: State matched: waiting_tl');
-                cornerPoints.tl = markerPosition;
-                measurementState = 'done'; // Finished collecting points for W/H
-                pointStored = true;
-                justCompleted = true;
-                break;
-              // Add case for 'waiting_back' later
-              default:
-                console.warn(
-                  'DEBUG: Tap occurred in unexpected/unhandled state:',
-                  measurementState
-                );
-                // Don't store point if state is unexpected (like 'idle' or 'done')
-                break;
-            }
-
-            if (pointStored) {
+            if (latestHitPoseMatrix) {
+              console.log('DEBUG: Hit detected! Calling placeMarker...');
+              const markerPosition = placeMarker(latestHitPoseMatrix);
               console.log(
-                'DEBUG: Stored point successfully. New state:',
+                'DEBUG: placeMarker returned position:',
+                markerPosition
+              );
+              if (!markerPosition) {
+                throw new Error('placeMarker failed to return position');
+              } // Treat as error
+
+              let pointStored = false;
+              let justCompleted = false;
+              console.log(
+                'DEBUG: Entering state switch for:',
                 measurementState
               );
-              console.log('DEBUG: Calling updateMeasuredLines...');
-              updateMeasuredLines(cornerPoints); // Update lines immediately
-              console.log('DEBUG: Calling updateInstructions...');
-              updateInstructions(); // Update instructions for next step / display results
-              if (justCompleted) {
-                console.log('DEBUG: Measurement points complete.');
+              switch (measurementState) {
+                case 'waiting_bl':
+                  console.log('DEBUG: State matched: waiting_bl');
+                  cornerPoints.bl = markerPosition;
+                  measurementState = 'waiting_br';
+                  pointStored = true;
+                  break;
+                case 'waiting_br':
+                  console.log('DEBUG: State matched: waiting_br');
+                  cornerPoints.br = markerPosition;
+                  measurementState = 'waiting_tl';
+                  pointStored = true;
+                  break;
+                case 'waiting_tl':
+                  console.log('DEBUG: State matched: waiting_tl');
+                  cornerPoints.tl = markerPosition;
+                  measurementState = 'done';
+                  pointStored = true;
+                  justCompleted = true;
+                  break;
+                default:
+                  console.warn(
+                    'DEBUG: Tap in unexpected state:',
+                    measurementState
+                  );
+                  break;
+              }
+              if (pointStored) {
+                console.log(
+                  'DEBUG: Stored point. New state:',
+                  measurementState
+                );
+                console.log(
+                  'DEBUG: Calling updateMeasuredLines/updateInstructions...'
+                );
+                updateMeasuredLines(cornerPoints);
+                updateInstructions();
+                if (justCompleted) {
+                  console.log('DEBUG: Measurement points complete.');
+                }
+              } else {
+                console.log('DEBUG: Point not stored.');
+                if (measurementState === 'done') {
+                  infoDivElement.textContent =
+                    'Measurement complete. Click Reset.';
+                }
               }
             } else {
-              console.log(
-                "DEBUG: Point not stored (state was likely 'idle' or 'done')."
-              );
-              // Maybe provide feedback if user taps when 'done'?
-              if (measurementState === 'done') {
+              console.log('DEBUG: No hit pose found for tap.');
+              // Update UI temporarily (logic unchanged from before)
+              const currentInstructions = infoDivElement.textContent;
+              if (!currentInstructions.endsWith('(No surface hit!)')) {
                 infoDivElement.textContent =
-                  'Measurement complete. Click Reset to start again.';
+                  currentInstructions + ' (No surface hit!)';
               }
+              setTimeout(() => {
+                const expectedMessage =
+                  currentInstructions + ' (No surface hit!)';
+                if (infoDivElement.textContent === expectedMessage) {
+                  updateInstructions();
+                }
+              }, 1500);
+            }
+            selectEventPending = false;
+            console.log('DEBUG: selectEventPending reset.');
+          }
+
+          // Render
+          // console.log("DEBUG: Calling renderer.render..."); // Can be very spammy
+          renderer.render(scene, camera);
+          // console.log("DEBUG: renderer.render finished."); // Spammy
+        } catch (error) {
+          // --- Catch any error within the frame logic ---
+          console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+          console.error('!!!!!!!! ERROR INSIDE onXRFrame !!!!!!!!');
+          console.error(error);
+          console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+          // Optionally try to end the session gracefully if an error occurs
+          if (currentSession) {
+            console.log('Attempting to end session due to frame error...');
+            currentSession
+              .end()
+              .catch((endErr) =>
+                console.error(
+                  'Error trying to end session after frame error:',
+                  endErr
+                )
+              );
+          }
+          // We might return here or let the loop stop naturally if session ends
+          return;
+        }
+      }
+
+      // --- Full Code ---
+      // Replace the existing onXRFrame function in the previous full code block
+      // with this updated version.
+      if (!frame) {
+        return;
+      }
+      latestHitPoseMatrix = null; // Reset hit pose for this frame
+
+      // Get Hit Test Results (Unchanged)
+      if (hitTestSourceRequested && hitTestSource && referenceSpace) {
+        try {
+          const hitTestResults = frame.getHitTestResults(hitTestSource);
+          if (hitTestResults.length > 0) {
+            const hit = hitTestResults[0];
+            const hitPose = hit.getPose(referenceSpace);
+            if (hitPose) {
+              latestHitPoseMatrix = hitPose.transform.matrix;
+            }
+          }
+        } catch (error) {
+          /* Ignore */
+        }
+      }
+
+      // Process Pending Select Event Based on State
+      if (selectEventPending) {
+        console.log(`DEBUG: Processing select in state: ${measurementState}`); // Log entry and state
+
+        if (latestHitPoseMatrix) {
+          console.log('DEBUG: Hit detected! Matrix available.'); // Log hit success
+
+          // Place a marker visually FIRST
+          console.log('DEBUG: Calling placeMarker...');
+          const markerPosition = placeMarker(latestHitPoseMatrix);
+          console.log('DEBUG: placeMarker returned position:', markerPosition);
+
+          if (!markerPosition) {
+            console.error(
+              'DEBUG: placeMarker did not return a valid position!'
+            );
+            selectEventPending = false; // Reset flag even on error
+            return; // Stop processing this tap
+          }
+
+          // Store point based on current state
+          let pointStored = false;
+          let justCompleted = false; // Flag if measurement finished this tap
+
+          console.log('DEBUG: Entering state switch for:', measurementState);
+          switch (measurementState) {
+            case 'waiting_bl':
+              console.log('DEBUG: State matched: waiting_bl');
+              cornerPoints.bl = markerPosition;
+              measurementState = 'waiting_br';
+              pointStored = true;
+              break;
+            case 'waiting_br':
+              console.log('DEBUG: State matched: waiting_br');
+              cornerPoints.br = markerPosition;
+              measurementState = 'waiting_tl';
+              pointStored = true;
+              break;
+            case 'waiting_tl':
+              console.log('DEBUG: State matched: waiting_tl');
+              cornerPoints.tl = markerPosition;
+              measurementState = 'done'; // Finished collecting points for W/H
+              pointStored = true;
+              justCompleted = true;
+              break;
+            // Add case for 'waiting_back' later
+            default:
+              console.warn(
+                'DEBUG: Tap occurred in unexpected/unhandled state:',
+                measurementState
+              );
+              // Don't store point if state is unexpected (like 'idle' or 'done')
+              break;
+          }
+
+          if (pointStored) {
+            console.log(
+              'DEBUG: Stored point successfully. New state:',
+              measurementState
+            );
+            console.log('DEBUG: Calling updateMeasuredLines...');
+            updateMeasuredLines(cornerPoints); // Update lines immediately
+            console.log('DEBUG: Calling updateInstructions...');
+            updateInstructions(); // Update instructions for next step / display results
+            if (justCompleted) {
+              console.log('DEBUG: Measurement points complete.');
             }
           } else {
-            // No hit detected on tap
-            console.log('DEBUG: No hit pose found for this tap.'); // Log hit failure
-            const currentInstructions = infoDivElement.textContent;
-            // Avoid appending multiple times if user taps rapidly
-            if (!currentInstructions.endsWith('(No surface hit!)')) {
+            console.log(
+              "DEBUG: Point not stored (state was likely 'idle' or 'done')."
+            );
+            // Maybe provide feedback if user taps when 'done'?
+            if (measurementState === 'done') {
               infoDivElement.textContent =
-                currentInstructions + ' (No surface hit!)';
+                'Measurement complete. Click Reset to start again.';
             }
-            setTimeout(() => {
-              // Revert message after delay only if state hasn't changed
-              // Check if the message is still the one we added
-              const expectedMessage =
-                currentInstructions + ' (No surface hit!)';
-              if (infoDivElement.textContent === expectedMessage) {
-                console.log("DEBUG: Reverting 'No surface hit' message.");
-                updateInstructions(); // Revert to standard instruction
-              }
-            }, 1500);
           }
-          selectEventPending = false; // Reset flag AFTER processing
-          console.log('DEBUG: selectEventPending reset to false.');
+        } else {
+          // No hit detected on tap
+          console.log('DEBUG: No hit pose found for this tap.'); // Log hit failure
+          const currentInstructions = infoDivElement.textContent;
+          // Avoid appending multiple times if user taps rapidly
+          if (!currentInstructions.endsWith('(No surface hit!)')) {
+            infoDivElement.textContent =
+              currentInstructions + ' (No surface hit!)';
+          }
+          setTimeout(() => {
+            // Revert message after delay only if state hasn't changed
+            // Check if the message is still the one we added
+            const expectedMessage = currentInstructions + ' (No surface hit!)';
+            if (infoDivElement.textContent === expectedMessage) {
+              console.log("DEBUG: Reverting 'No surface hit' message.");
+              updateInstructions(); // Revert to standard instruction
+            }
+          }, 1500);
         }
+        selectEventPending = false; // Reset flag AFTER processing
+        console.log('DEBUG: selectEventPending reset to false.');
+      }
 
-        // Render (Unchanged)
-        try {
-          renderer.render(scene, camera);
-        } catch (error) {
-          console.error('Render error:', error);
-        }
+      // Render (Unchanged)
+      try {
+        renderer.render(scene, camera);
+      } catch (error) {
+        console.error('Render error:', error);
       }
 
       // --- Full Code ---
