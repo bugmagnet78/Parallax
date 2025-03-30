@@ -6,9 +6,9 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, user-scalable=no"
     />
-    <title>WebXR Core Test + Min GL Layer (Corrected)</title>
+    <title>WebXR + MediaPipe Objectron (Full Integration)</title>
     <style>
-      /* CSS styles remain the same */
+      /* CSS styles */
       body {
         margin: 0;
         overflow: hidden;
@@ -28,33 +28,36 @@
         padding: 10px;
         font-size: 16px;
         box-sizing: border-box;
+        min-height: 3em;
       }
-      #start-ar-button {
+      .button-container {
         position: absolute;
         bottom: 30px;
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 14px 28px;
-        font-size: 18px;
+        width: 100%;
+        text-align: center;
+        z-index: 101;
+      }
+      .button-container button {
+        padding: 12px 24px;
+        font-size: 16px;
         background-color: #007bff;
         color: white;
         border: none;
         border-radius: 8px;
         cursor: pointer;
-        z-index: 101;
         box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
         transition: background-color 0.3s ease;
       }
-      #start-ar-button:disabled {
+      .button-container button:disabled {
         background-color: #555;
         color: #aaa;
         cursor: not-allowed;
         box-shadow: none;
       }
-      #start-ar-button:hover:not(:disabled) {
+      .button-container button:hover:not(:disabled) {
         background-color: #0056b3;
       }
-      canvas {
+      canvas#webgl-canvas {
         display: block;
         position: absolute;
         top: 0;
@@ -63,376 +66,485 @@
         height: 100%;
         z-index: 1;
       }
+      video#input-video {
+        display: none;
+      }
     </style>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/"
+        }
+      }
+    </script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/@mediapipe/objectron/objectron.js"
+      crossorigin="anonymous"
+    ></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"
+      crossorigin="anonymous"
+    ></script>
   </head>
   <body>
     <div id="info">Initializing...</div>
-    <button id="start-ar-button" disabled>Start Core AR Test</button>
+    <div class="button-container">
+      <button id="start-ar-button" disabled>Start AR Objectron</button>
+    </div>
+    <video id="input-video"></video>
     <canvas id="webgl-canvas"></canvas>
 
     <script type="module">
       console.log(
-        '--- JavaScript module execution started (Min WebGL - Corrected) ---'
+        '--- JavaScript module execution started (Objectron Full Integration) ---'
+      );
+
+      import * as THREE from 'three';
+
+      console.log('Three.js imported:', THREE ? 'Yes' : 'No');
+      console.log(
+        'MediaPipe Objectron available:',
+        window.Objectron ? 'Yes' : 'No'
       );
 
       // --- Relevant Context ---
-      // Current time: Friday, March 28, 2025 at 6:33 PM
+      // Current time: Sunday, March 30, 2025 at 4:11 PM
       // Location: Kochi, Kerala, India
 
       // Global variables
-      let gl = null; // WebGL rendering context
-      let xrWebGLLayer = null;
-      let hitTestSource = null;
-      let hitTestSourceRequested = false;
-      let currentSession = null;
+      let camera, scene, renderer; // Three.js
+      let currentSession = null; // WebXR
       let referenceSpace = null;
-      let xrFrameLoopActive = false;
-      let latestHitPoseMatrix = null;
-      let selectEventPending = false;
+      let objectron = null; // MediaPipe
+      let cameraHelper = null; // MediaPipe Camera Util
+      let latestObjectronResult = null; // Store detection result
+      let objectronBoundingBox = null; // Three.js Box Helper
 
-      // Get UI elements & Canvas
       const infoDivElement = document.getElementById('info');
       const startButtonElement = document.getElementById('start-ar-button');
+      const videoElement = document.getElementById('input-video');
       const canvasElement = document.getElementById('webgl-canvas');
 
-      // --- Function Definitions (Defined ONCE) ---
+      // --- Function Definitions (Defined ONCE Each) ---
 
-      function init() {
+      async function init() {
         console.log('init() called');
-        if (!infoDivElement || !startButtonElement || !canvasElement) {
-          console.error('FATAL: UI or Canvas element not found!');
-          alert('Error: UI element not found.');
+        if (
+          !infoDivElement ||
+          !startButtonElement ||
+          !canvasElement ||
+          !videoElement ||
+          !window.Objectron
+        ) {
+          console.error(
+            'FATAL: UI/Canvas/Video/Objectron missing or MP not loaded.'
+          );
+          displayCompatibilityError(
+            'Error: Required elements or MediaPipe Objectron not loaded.'
+          );
           return;
         }
-        infoDivElement.textContent = 'Setting up WebGL...';
+
+        infoDivElement.textContent = 'Setting up Scene & Renderer...';
         try {
-          gl = canvasElement.getContext('webgl2', { xrCompatible: true });
-          if (!gl) {
-            console.log('WebGL2 not supported, trying WebGL1');
-            gl = canvasElement.getContext('webgl', { xrCompatible: true });
-          }
-          if (!gl) {
-            throw new Error(
-              'WebGL is not supported or xrCompatible context failed.'
-            );
-          }
-          console.log('WebGL context obtained successfully (xrCompatible).');
-          gl.clearColor(0.0, 0.0, 0.0, 0.0);
-          gl.enable(gl.DEPTH_TEST);
-          gl.enable(gl.BLEND);
-          gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+          scene = new THREE.Scene();
+          camera = new THREE.PerspectiveCamera(
+            70,
+            window.innerWidth / window.innerHeight,
+            0.01,
+            40
+          );
+          renderer = new THREE.WebGLRenderer({
+            canvas: canvasElement,
+            antialias: true,
+            alpha: true,
+          });
+          renderer.setPixelRatio(window.devicePixelRatio);
+          renderer.setSize(window.innerWidth, window.innerHeight);
+          renderer.xr.enabled = true;
+          console.log('Three.js Renderer initialized, XR enabled.');
+          const light = new THREE.AmbientLight(0xffffff, 1.0);
+          scene.add(light);
+          const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+          dirLight.position.set(1, 1, 1);
+          scene.add(dirLight);
+          const initialBox = new THREE.Box3(
+            new THREE.Vector3(-0.5, -0.5, -0.5),
+            new THREE.Vector3(0.5, 0.5, 0.5)
+          ); // Unit box
+          objectronBoundingBox = new THREE.Box3Helper(initialBox, 0xffff00); // Yellow
+          objectronBoundingBox.visible = false;
+          scene.add(objectronBoundingBox);
+          console.log('Objectron bounding box helper created.');
         } catch (error) {
-          console.error('Error getting WebGL context:', error);
-          infoDivElement.textContent =
-            'Error initializing WebGL: ' + error.message;
-          displayCompatibilityError('WebGL initialization failed.');
+          console.error('Init Error (Three.js):', error);
+          displayCompatibilityError('3D Setup failed: ' + error.message);
           return;
         }
-        infoDivElement.textContent = 'Checking WebXR support...';
+
+        infoDivElement.textContent = 'Loading Objectron Model...';
+        try {
+          console.log('Attempting: new Objectron(...)');
+          objectron = new Objectron({
+            locateFile: (file) => {
+              const basePath =
+                'https://cdn.jsdelivr.net/npm/@mediapipe/objectron@0.4/';
+              console.log(`Locating file: ${file} -> ${basePath}${file}`);
+              return `${basePath}${file}`;
+            },
+          });
+          if (!objectron)
+            throw new Error(
+              'Objectron instance is null/undefined after constructor.'
+            );
+          console.log('Objectron instance created.');
+
+          // --- Re-enable setOptions ---
+          console.log('Attempting: objectron.setOptions(...)');
+          objectron.setOptions({
+            staticImageMode: false,
+            modelName: 'Shoe', // CHANGE this to 'Chair', 'Cup', or 'Camera' as needed
+            maxNumObjects: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.7, // Lowered tracking slightly from 0.99 just in case
+          });
+          console.log(
+            `Objectron options set (Model: ${
+              objectron.options?.modelName || 'N/A'
+            }).`
+          ); // Use optional chaining
+
+          // --- Set callback ---
+          console.log('Attempting: objectron.onResults(...)');
+          objectron.onResults(onObjectronResults);
+          console.log('Objectron results callback set.');
+        } catch (error) {
+          console.error('MediaPipe Init Error:', error);
+          displayCompatibilityError('MediaPipe setup failed: ' + error.message);
+          return;
+        }
+
+        // --- Re-enable Camera Setup ---
+        infoDivElement.textContent = 'Setting up Camera...';
+        try {
+          cameraHelper = new Camera(videoElement, {
+            onFrame: async () => {
+              if (objectron) {
+                await objectron.send({ image: videoElement });
+              }
+            }, // Check objectron exists
+            width: 640,
+            height: 480,
+          });
+          await cameraHelper.start();
+          console.log('MediaPipe Camera util started.');
+          infoDivElement.textContent = 'Camera OK. Checking WebXR...';
+        } catch (error) {
+          console.error('Camera Setup Error:', error);
+          displayCompatibilityError('Camera setup failed: ' + error.message);
+          return;
+        }
+
+        // --- Re-enable WebXR Check ---
         checkXRSupport();
         window.addEventListener('resize', onWindowResize, false);
       }
 
+      function onObjectronResults(results) {
+        // Store latest results
+        if (results.objectDetections && results.objectDetections.length > 0) {
+          latestObjectronResult = results.objectDetections[0];
+          // console.log("Objectron results received:", latestObjectronResult); // DEBUG
+        } else {
+          latestObjectronResult = null;
+        }
+      }
+
       async function checkXRSupport() {
+        // Unchanged - checks AR support and enables button
         console.log('checkXRSupport() called.');
-        infoDivElement.textContent = 'Checking WebXR capabilities...';
         console.log('navigator.xr:', navigator.xr);
         if ('xr' in navigator && navigator.xr) {
-          console.log('navigator.xr exists. Checking session support...');
-          infoDivElement.textContent = 'Checking for immersive-ar support...';
+          console.log('navigator.xr exists...');
+          infoDivElement.textContent = 'Checking immersive-ar...';
           try {
-            const basicSupport = await navigator.xr.isSessionSupported(
+            const supported = await navigator.xr.isSessionSupported(
               'immersive-ar'
             );
-            console.log(`Basic 'immersive-ar' supported: ${basicSupport}`);
-            if (basicSupport) {
-              infoDivElement.textContent = 'Checking for hit-test feature...';
-              console.log('Checking support for immersive-ar WITH hit-test...');
-              const featureSupport = await navigator.xr.isSessionSupported(
-                'immersive-ar',
-                { requiredFeatures: ['hit-test'] }
+            console.log(`'immersive-ar' supported: ${supported}`);
+            if (supported) {
+              infoDivElement.textContent = 'Ready! Click "Start AR Objectron"';
+              startButtonElement.disabled = false;
+              startButtonElement.addEventListener(
+                'click',
+                handleStartButtonClick
               );
-              console.log(
-                `'immersive-ar' with 'hit-test' supported: ${featureSupport}`
-              );
-              if (featureSupport) {
-                infoDivElement.textContent =
-                  'Ready! Click "Start Core AR Test"';
-                startButtonElement.disabled = false;
-                startButtonElement.addEventListener('click', startARSession);
-                console.log('AR Button enabled.');
-              } else {
-                infoDivElement.textContent =
-                  'AR supported, but Hit Test feature is not.';
-                console.error('Hit-test feature not supported.');
-                displayCompatibilityError('Hit-test feature not supported.');
-              }
+              console.log('AR Button enabled.');
             } else {
-              infoDivElement.textContent = 'Immersive AR mode not supported.';
-              console.error('Basic immersive-ar not supported.');
-              displayCompatibilityError('Immersive AR mode not supported.');
+              infoDivElement.textContent = 'Immersive AR not supported.';
+              displayCompatibilityError('Immersive AR not supported.');
             }
           } catch (err) {
             infoDivElement.textContent =
-              'Error during WebXR support check: ' + err.message;
-            console.error('Error calling isSessionSupported:', err);
+              'WebXR support check Error: ' + err.message;
+            console.error('Error isSessionSupported:', err);
             displayCompatibilityError(err.message);
           }
         } else {
           infoDivElement.textContent = 'WebXR API not found.';
-          console.error('navigator.xr object not found.');
           displayCompatibilityError('WebXR API not available.');
         }
       }
 
       function displayCompatibilityError(message) {
         console.error('Compatibility Error:', message);
-        startButtonElement.disabled = true;
+        if (startButtonElement) startButtonElement.disabled = true;
+        // Only update text if it's not already an error to avoid overwriting specifics
+        if (
+          infoDivElement &&
+          !infoDivElement.textContent.startsWith('Error:') &&
+          !infoDivElement.textContent.startsWith('Fatal:')
+        ) {
+          infoDivElement.textContent = message;
+        }
+      }
+
+      function handleStartButtonClick() {
+        if (!currentSession) {
+          startARSession();
+        }
       }
 
       async function startARSession() {
+        // Unchanged - starts session
         infoDivElement.textContent = 'Starting AR session...';
         startButtonElement.disabled = true;
         startButtonElement.style.display = 'none';
-        console.log('Attempting to start AR session...');
+        console.log('Attempting startARSession...');
         if (currentSession) {
-          console.warn('Session already active? Ending previous.');
+          console.warn('Session active? Ending.');
           try {
             await currentSession.end();
-          } catch (e) {
-            console.error('Error ending previous session:', e);
-          }
+          } catch (e) {}
           currentSession = null;
         }
         try {
-          currentSession = await navigator.xr.requestSession('immersive-ar', {
-            requiredFeatures: ['hit-test'],
-          });
-          console.log('navigator.xr.requestSession succeeded.');
+          currentSession = await navigator.xr.requestSession('immersive-ar');
+          console.log('requestSession succeeded.');
           onSessionStarted(currentSession);
         } catch (error) {
-          console.error('Failed to start AR session:', error);
-          infoDivElement.textContent = `Failed to start AR: ${error.message}. Check permissions.`;
+          console.error('Failed startARSession:', error);
+          infoDivElement.textContent = `Failed AR Start: ${error.message}`;
           startButtonElement.style.display = 'block';
           startButtonElement.disabled = false;
         }
       }
 
       async function onSessionStarted(session) {
-        infoDivElement.textContent =
-          'AR Session Active. Configuring render state...';
+        // Unchanged - sets up session with 'local' hint
         console.log('onSessionStarted called.');
         session.addEventListener('end', onSessionEnded);
-        session.addEventListener('select', onSelect);
-        console.log("'select' event listener added.");
+        // No select listener
 
-        if (!gl) {
-          console.error('WebGL context is missing!');
-          infoDivElement.textContent = 'Error: WebGL context lost.';
-          try {
-            await session.end();
-          } catch (e) {}
-          return;
-        }
         try {
-          console.log('Attempting to create XRWebGLLayer...');
-          xrWebGLLayer = new XRWebGLLayer(session, gl);
-          console.log('XRWebGLLayer created.');
-          console.log('Attempting session.updateRenderState...');
-          await session.updateRenderState({ baseLayer: xrWebGLLayer });
-          console.log('Session render state updated with baseLayer.');
-          canvasElement.width = xrWebGLLayer.framebufferWidth;
-          canvasElement.height = xrWebGLLayer.framebufferHeight;
-          console.log(
-            'Canvas resized to XR framebuffer:',
-            canvasElement.width,
-            'x',
-            canvasElement.height
-          );
-        } catch (error) {
-          console.error(
-            'Error setting up XRWebGLLayer or Render State:',
-            error
-          );
-          infoDivElement.textContent =
-            'Error setting up WebGL layer: ' + error.message;
-          try {
-            await session.end();
-          } catch (e) {}
-          return;
-        }
-
-        referenceSpace = null;
-        let referenceSpaceType = 'unknown';
-        try {
-          console.log("Attempting to request reference space: 'local'");
-          referenceSpace = await session.requestReferenceSpace('local');
-          referenceSpaceType = 'local';
-          console.log("Successfully obtained reference space: 'local'");
-        } catch (localError) {
-          console.warn(
-            `Failed to get 'local' ref space: ${localError.message}. Trying 'local-floor'.`
-          );
-          infoDivElement.textContent = "Trying 'local-floor' space...";
-          try {
-            console.log("Attempting reference space: 'local-floor'");
-            referenceSpace = await session.requestReferenceSpace('local-floor');
-            referenceSpaceType = 'local-floor';
-            console.log("Successfully obtained reference space: 'local-floor'");
-          } catch (floorError) {
-            console.error(
-              `Failed to get 'local-floor' ref space: ${floorError.message}.`
-            );
-            infoDivElement.textContent = `Error: No suitable ref space: ${floorError.message}`;
-            try {
-              await session.end();
-            } catch (e) {}
-            return;
-          }
-        }
-        if (!referenceSpace) {
-          console.error('Ref space null after attempts.');
-          infoDivElement.textContent = 'Fatal Error: No coordinate system.';
-          try {
-            await session.end();
-          } catch (e) {}
-          return;
-        }
-        infoDivElement.textContent = `Using '${referenceSpaceType}' space. Setting up hit test...`;
-
-        hitTestSource = null;
-        hitTestSourceRequested = false;
-        try {
-          console.log("Attempting 'viewer' space for hit test setup");
-          const viewerSpace = await session.requestReferenceSpace('viewer');
-          console.log("Got 'viewer' space.");
-          console.log('Attempting hit test source...');
-          hitTestSource = await session.requestHitTestSource({
-            space: viewerSpace,
-          });
-          hitTestSourceRequested = true;
-          console.log('Hit test source obtained successfully.');
-          infoDivElement.textContent =
-            'AR Ready. Point at surface & tap to log hit pose.';
+          console.log("Setting hint 'local'...");
+          renderer.xr.setReferenceSpaceType('local');
+          console.log('Hint set.');
+          console.log('Attempting setSession...');
+          await renderer.xr.setSession(session);
+          console.log('Successfully set renderer XR session.');
         } catch (err) {
-          console.error(`Error during hit test setup: ${err.message}`);
-          infoDivElement.textContent = `Using '${referenceSpaceType}' space, but Hit-Test setup failed: ${err.message}`;
-          hitTestSourceRequested = false;
-          console.warn('Proceeding without hit testing.');
+          console.error('Error setSession:', err);
+          infoDivElement.textContent = 'Fatal: Link renderer error.';
+          try {
+            await session.end();
+          } catch (e) {}
+          return;
         }
 
-        if (referenceSpace) {
-          xrFrameLoopActive = true;
-          session.requestAnimationFrame(onXRFrame);
-          console.log('XR Frame Loop started.');
-        } else {
-          console.error('Cannot start frame loop without referenceSpace.');
+        referenceSpace = renderer.xr.getReferenceSpace();
+        if (!referenceSpace) {
+          console.error('Failed get ref space.');
+          infoDivElement.textContent = 'Fatal: No coordinate system.';
+          try {
+            await session.end();
+          } catch (e) {}
+          return;
         }
+        console.log(`Using reference space from Three.js (requested 'local').`);
+        infoDivElement.textContent = `AR Session Running. Point at a ${
+          objectron?.options?.modelName || 'Object'
+        }.`;
+
+        renderer.setAnimationLoop(onXRFrame);
+        console.log('Three.js Render Loop started.');
       }
 
       function onSessionEnded(/*event*/) {
+        // Unchanged - stops loop, resets variables, updates UI
         console.log('onSessionEnded called.');
-        xrFrameLoopActive = false;
-        currentSession?.removeEventListener('select', onSelect);
         currentSession = null;
-        hitTestSourceRequested = false;
-        hitTestSource = null;
         referenceSpace = null;
-        xrWebGLLayer = null;
-        infoDivElement.textContent =
-          'AR Session ended. Click Start to begin again.';
-        startButtonElement.style.display = 'block';
+        latestObjectronResult = null;
+        try {
+          renderer.setAnimationLoop(null);
+          console.log('Three.js Render Loop stopped.');
+        } catch (error) {
+          console.error('Error stopping loop:', error);
+        }
+        if (objectronBoundingBox) objectronBoundingBox.visible = false;
+        infoDivElement.textContent = 'AR Session ended. Click Start again.';
+        startButtonElement.style.display = 'inline-block';
         startButtonElement.disabled = false;
         console.log('AR Session Ended.');
+        // Consider stopping cameraHelper here
+        // cameraHelper?.stop().then(() => console.log("Camera helper stopped on session end."));
       }
 
       function onWindowResize() {
-        /* Can be empty for now */
+        if (!renderer.xr.isPresenting) {
+          camera.aspect = window.innerWidth / window.innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(window.innerWidth, window.innerHeight);
+        }
       }
 
-      function onSelect(event) {
-        console.log('Select event detected on session.');
-        selectEventPending = true;
-      }
-
+      // --- onXRFrame Function (with detection logs and transform attempt) ---
       function onXRFrame(timestamp, frame) {
-        if (!currentSession || !xrFrameLoopActive) {
-          console.log('Exiting frame loop.');
+        // console.log(`onXRFrame: T=${timestamp}`); // Spammy
+        if (!frame || !currentSession) {
           return;
         }
-        let session = frame.session;
-        session.requestAnimationFrame(onXRFrame); // Use let or const
 
-        // --- GL Prep ---
-        if (gl && xrWebGLLayer) {
-          try {
-            gl.bindFramebuffer(gl.FRAMEBUFFER, xrWebGLLayer.framebuffer);
-            const pose = frame.getViewerPose(referenceSpace);
-            if (pose) {
-              for (const view of pose.views) {
-                const viewport = xrWebGLLayer.getViewport(view);
-                if (!viewport) continue;
-                gl.viewport(
-                  viewport.x,
-                  viewport.y,
-                  viewport.width,
-                  viewport.height
-                );
-                gl.clearColor(0, 0, 0, 0);
-                gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-              }
+        try {
+          const pose = frame.getViewerPose(referenceSpace);
+          if (!pose) {
+            renderer.render(scene, camera);
+            return;
+          } // Render even if pose lost briefly
+          // This is the Camera's pose IN the World Reference Space
+          const cameraWorldMatrix = new THREE.Matrix4().fromArray(
+            pose.transform.matrix
+          );
+
+          if (latestObjectronResult) {
+            // console.log("DEBUG: Objectron Result DETECTED this frame."); // Spammy
+            const objectron_R = latestObjectronResult.rotation; // Array (9 elements?)
+            const objectron_T = latestObjectronResult.translation; // Array [x,y,z]
+            const objectron_S = latestObjectronResult.scale; // Array [sx,sy,sz] - Dimensions/Scale?
+
+            if (
+              !objectron_R ||
+              !objectron_T ||
+              !objectron_S ||
+              objectron_R.length !== 9
+            ) {
+              console.warn(
+                'Received Objectron result but missing/invalid pose/scale data.',
+                latestObjectronResult
+              );
+              objectronBoundingBox.visible = false;
             } else {
-              // Optional clear if pose lost? Usually handled by layer.
-              // gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-            }
-          } catch (error) {
-            console.error('Error during GL prep in frame loop:', error);
-          }
-        }
+              // --- Transform ---
+              // Construct 4x4 matrix for the object *relative to the camera* frame
+              // Assuming MP gives 3x3 Rotation (Column Major) + Translation
+              const objectMatrixCamera = new THREE.Matrix4();
+              objectMatrixCamera.set(
+                objectron_R[0],
+                objectron_R[3],
+                objectron_R[6],
+                objectron_T[0],
+                objectron_R[1],
+                objectron_R[4],
+                objectron_R[7],
+                objectron_T[1],
+                objectron_R[2],
+                objectron_R[5],
+                objectron_R[8],
+                objectron_T[2],
+                0,
+                0,
+                0,
+                1
+              );
+              // If MP format is different (e.g., Row Major, or full 4x4), adjust accordingly!
 
-        // --- Hit Test / Select Logic ---
-        latestHitPoseMatrix = null;
-        if (hitTestSourceRequested && hitTestSource && referenceSpace) {
-          try {
-            const hitTestResults = frame.getHitTestResults(hitTestSource);
-            if (hitTestResults.length > 0) {
-              const hit = hitTestResults[0];
-              const hitPose = hit.getPose(referenceSpace);
-              if (hitPose) {
-                latestHitPoseMatrix = hitPose.transform.matrix;
+              // Calculate object's world matrix: World = CameraWorld * ObjectLocalCamera
+              const objectWorldMatrix = new THREE.Matrix4().multiplyMatrices(
+                cameraWorldMatrix,
+                objectMatrixCamera
+              );
+
+              // --- Update Visualizer (Box3Helper) ---
+              // Decompose the final world matrix
+              const position = new THREE.Vector3();
+              const quaternion = new THREE.Quaternion();
+              const scale = new THREE.Vector3();
+              objectWorldMatrix.decompose(position, quaternion, scale); // Note: This scale might not be the objectron_S scale if camera matrix has scale
+
+              objectronBoundingBox.position.copy(position);
+              objectronBoundingBox.quaternion.copy(quaternion);
+              // Apply the specific SCALE from Objectron result. Box3Helper is 1x1x1.
+              objectronBoundingBox.scale.set(
+                objectron_S[0],
+                objectron_S[1],
+                objectron_S[2]
+              );
+
+              objectronBoundingBox.visible = true;
+              // No need for matrixAutoUpdate=false if manipulating position/quaternion/scale
+
+              // --- Display Scale ---
+              const scaleText = `Est. Scale: X:${objectron_S[0].toFixed(
+                3
+              )}, Y:${objectron_S[1].toFixed(3)}, Z:${objectron_S[2].toFixed(
+                3
+              )}`;
+              if (infoDivElement.textContent !== scaleText) {
+                infoDivElement.textContent = scaleText;
               }
             }
-          } catch (error) {}
-        }
-        if (selectEventPending) {
-          console.log('Processing pending select event...');
-          if (latestHitPoseMatrix) {
-            const position = {
-              x: latestHitPoseMatrix[12].toFixed(3),
-              y: latestHitPoseMatrix[13].toFixed(3),
-              z: latestHitPoseMatrix[14].toFixed(3),
-            };
-            infoDivElement.textContent = `Hit detected at ~ X:${position.x}, Y:${position.y}, Z:${position.z}`;
-            console.log('>>> Hit Placement <<< Matrix:', latestHitPoseMatrix);
           } else {
-            infoDivElement.textContent =
-              'Tap processed, but no surface hit detected this frame.';
-            console.log('Tap processed, but no valid hit pose found.');
+            // console.log("DEBUG: No Objectron result this frame."); // Spammy
+            objectronBoundingBox.visible = false;
+            const defaultText = `AR Session Running. Point at a ${
+              objectron?.options?.modelName || 'Object'
+            }.`;
+            if (infoDivElement.textContent !== defaultText) {
+              infoDivElement.textContent = defaultText;
+            }
           }
-          selectEventPending = false;
+          renderer.render(scene, camera);
+        } catch (error) {
+          console.error(
+            '!!!!!!!!!!!!!!!! ERROR INSIDE onXRFrame !!!!!!!!!!!!!!!!'
+          );
+          console.error(error);
+          console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+          if (currentSession) {
+            console.log('Ending session due to frame error...');
+            currentSession
+              .end()
+              .catch((endErr) =>
+                console.error('Error ending session post-error:', endErr)
+              );
+          }
+          return; // Stop this frame on error
         }
-      }
+      } // End of onXRFrame
 
       // --- Start the application ---
       document.addEventListener('DOMContentLoaded', () => {
-        console.log('Event: DOMContentLoaded fired.');
+        console.log('DOM Ready.');
         init();
       });
       console.log(
-        '--- JavaScript module execution finished (Min WebGL - Corrected) ---'
+        '--- JS module execution finished (Objectron Full Integration - Corrected) ---'
       );
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+    <script src="//cdn.jsdelivr.net/npm/eruda"></script>
     <script>
       eruda.init();
     </script>
