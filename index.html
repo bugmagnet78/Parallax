@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, user-scalable=no"
     />
-    <title>WebXR Measurement - Three.js (Local Hint Corrected)</title>
+    <title>WebXR Measurement - User Guided Taps</title>
     <style>
       /* CSS styles */
       body {
@@ -29,11 +29,19 @@
         font-size: 16px;
         box-sizing: border-box;
       }
-      #start-ar-button {
+      .button-container {
+        /* Container for buttons at bottom */
         position: absolute;
         bottom: 30px;
-        left: 50%;
-        transform: translateX(-50%);
+        width: 100%;
+        text-align: center;
+        z-index: 101;
+        display: flex;
+        justify-content: center;
+        gap: 20px; /* Arrange buttons side-by-side */
+      }
+      .button-container button {
+        /* Style for buttons */
         padding: 14px 28px;
         font-size: 18px;
         background-color: #007bff;
@@ -41,19 +49,25 @@
         border: none;
         border-radius: 8px;
         cursor: pointer;
-        z-index: 101;
         box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
         transition: background-color 0.3s ease;
       }
-      #start-ar-button:disabled {
+      .button-container button:disabled {
         background-color: #555;
         color: #aaa;
         cursor: not-allowed;
         box-shadow: none;
       }
-      #start-ar-button:hover:not(:disabled) {
+      .button-container button:hover:not(:disabled) {
         background-color: #0056b3;
       }
+      #reset-button {
+        background-color: #dc3545;
+      } /* Red for Reset */
+      #reset-button:hover:not(:disabled) {
+        background-color: #c82333;
+      }
+
       canvas {
         display: block;
         position: absolute;
@@ -76,12 +90,15 @@
   </head>
   <body>
     <div id="info">Initializing...</div>
-    <button id="start-ar-button" disabled>Start Measurement</button>
+    <div class="button-container">
+      <button id="start-ar-button" disabled>Start Measurement</button>
+      <button id="reset-button" style="display: none">Reset</button>
+    </div>
     <canvas id="webgl-canvas"></canvas>
 
     <script type="module">
       console.log(
-        '--- JavaScript module execution started (Local Hint Corrected) ---'
+        '--- JavaScript module execution started (User Guided Taps) ---'
       );
 
       import * as THREE from 'three';
@@ -92,7 +109,7 @@
       );
 
       // --- Relevant Context ---
-      // Current time: Friday, March 28, 2025 at 10:39 PM
+      // Current time: Saturday, March 29, 2025 at 9:00 PM
       // Location: Kochi, Kerala, India
 
       // Global variables
@@ -103,17 +120,34 @@
       let referenceSpace = null;
       let latestHitPoseMatrix = null;
       let selectEventPending = false;
-      let placedMarkers = [];
+      let placedMarkers = []; // Holds THREE.Mesh objects
 
+      // --- State Management for Measurement ---
+      let measurementState = 'idle'; // 'idle', 'waiting_bl', 'waiting_br', 'waiting_tl', 'done'
+      let cornerPoints = {
+        // Stores THREE.Vector3 positions
+        bl: null, // bottom-left
+        br: null, // bottom-right
+        tl: null, // top-left
+        // Add 'back' or other points later if needed
+      };
+
+      // Get UI elements
       const infoDivElement = document.getElementById('info');
       const startButtonElement = document.getElementById('start-ar-button');
+      const resetButtonElement = document.getElementById('reset-button');
       const canvasElement = document.getElementById('webgl-canvas');
 
       // --- Function Definitions (Defined ONCE) ---
 
       function init() {
         console.log('init() called');
-        if (!infoDivElement || !startButtonElement || !canvasElement) {
+        if (
+          !infoDivElement ||
+          !startButtonElement ||
+          !canvasElement ||
+          !resetButtonElement
+        ) {
           console.error('FATAL: UI/Canvas element missing.');
           alert('UI Error.');
           return;
@@ -127,11 +161,10 @@
             0.01,
             40
           );
-          // Use no antialias for this test
           renderer = new THREE.WebGLRenderer({
             canvas: canvasElement,
             alpha: true,
-          });
+          }); // No antialias based on previous test
           renderer.setPixelRatio(window.devicePixelRatio);
           renderer.setSize(window.innerWidth, window.innerHeight);
           renderer.xr.enabled = true;
@@ -149,12 +182,18 @@
           displayCompatibilityError('Three.js setup failed.');
           return;
         }
+
+        // Add event listener for reset button
+        resetButtonElement.addEventListener('click', resetMeasurement);
+
         infoDivElement.textContent = 'Checking WebXR support...';
         checkXRSupport();
         window.addEventListener('resize', onWindowResize, false);
+        updateInstructions(); // Set initial instruction
       }
 
       async function checkXRSupport() {
+        // (Unchanged - checks 'immersive-ar' & 'hit-test')
         console.log('checkXRSupport() called.');
         infoDivElement.textContent = 'Checking WebXR capabilities...';
         console.log('navigator.xr:', navigator.xr);
@@ -177,11 +216,14 @@
                 `'immersive-ar' with 'hit-test' supported: ${featureSupport}`
               );
               if (featureSupport) {
-                infoDivElement.textContent = 'Ready! Click "Start Measurement"';
-                startButtonElement.disabled = false;
-                startButtonElement.addEventListener('click', startARSession);
+                /* Ready state handled by updateInstructions */ startButtonElement.disabled = false;
+                startButtonElement.addEventListener(
+                  'click',
+                  handleStartButtonClick
+                );
                 console.log('AR Button enabled.');
-              } else {
+              } // Changed listener
+              else {
                 infoDivElement.textContent =
                   'AR supported, but Hit Test required.';
                 console.error('Hit-test feature not supported.');
@@ -203,11 +245,25 @@
           console.error('navigator.xr object not found.');
           displayCompatibilityError('WebXR API not available.');
         }
+        updateInstructions(); // Update UI based on checks
       }
 
       function displayCompatibilityError(message) {
         console.error('Compatibility Error:', message);
         startButtonElement.disabled = true;
+        measurementState = 'error';
+        updateInstructions();
+      }
+
+      // --- Button Click Handler ---
+      function handleStartButtonClick() {
+        if (!currentSession) {
+          // If session not active, start it
+          startARSession();
+        }
+        // If session *is* active, this button might act as a reset or trigger next step?
+        // For now, starting session also implies starting measurement sequence.
+        // Let Reset button handle explicit resets.
       }
 
       async function startARSession() {
@@ -221,7 +277,7 @@
             await currentSession.end();
           } catch (e) {}
           currentSession = null;
-        }
+        } // Ensure clean start
         try {
           currentSession = await navigator.xr.requestSession('immersive-ar', {
             requiredFeatures: ['hit-test'],
@@ -233,100 +289,81 @@
           infoDivElement.textContent = `Failed AR Start: ${error.message}`;
           startButtonElement.style.display = 'block';
           startButtonElement.disabled = false;
-        }
+          measurementState = 'idle';
+          updateInstructions();
+        } // Reset state on failure
       }
 
       async function onSessionStarted(session) {
-        infoDivElement.textContent =
-          'AR Session Active. Configuring Renderer & Spaces...';
         console.log('onSessionStarted called.');
         session.addEventListener('end', onSessionEnded);
         session.addEventListener('select', onSelect);
         console.log("'select' event listener added.");
 
-        // --- Try hint 'local' ---
+        // Configure and link renderer
         try {
           console.log(
             "Setting Three.js reference space type hint to 'local'..."
           );
           renderer.xr.setReferenceSpaceType('local');
-          console.log("Reference space type hint set to 'local'.");
-        } catch (err) {
-          console.error('Error setting reference space type hint:', err);
-          infoDivElement.textContent = 'Error config ref space hint.';
-          try {
-            await session.end();
-          } catch (e) {}
-          return;
-        }
-
-        // --- Link session to Renderer ---
-        console.log('Attempting: await renderer.xr.setSession(session)...');
-        try {
-          await renderer.xr.setSession(session); // Uses 'local' hint
+          console.log('Hint set.');
+          console.log('Attempting: await renderer.xr.setSession(session)...');
+          await renderer.xr.setSession(session);
           console.log('Successfully set renderer XR session.');
         } catch (err) {
-          console.error('Error calling renderer.xr.setSession:', err);
-          console.log('Session object at error:', session);
-          console.log('renderer.xr object at error:', renderer.xr);
-          if (err.message.includes('reference space type')) {
-            infoDivElement.textContent = `Fatal: Could not get ref space ('local' hint) via Three.js: ${err.message}`;
-          } else {
-            infoDivElement.textContent =
-              'Fatal: Could not link session to renderer: ' + err.message;
-          }
+          /* ... error handling ... */ console.error('Error setSession:', err);
+          infoDivElement.textContent = 'Fatal: Link renderer error.';
           try {
             await session.end();
           } catch (e) {}
           return;
         }
 
-        // --- Get reference space from Three.js ---
+        // Get reference space
         referenceSpace = renderer.xr.getReferenceSpace();
         if (!referenceSpace) {
-          console.error('Failed get ref space from Manager.');
-          infoDivElement.textContent =
-            'Fatal: Failed coord system setup via Three.js.';
+          /* ... error handling ... */ console.error('Failed get ref space.');
+          infoDivElement.textContent = 'Fatal: No coordinate system.';
           try {
             await session.end();
           } catch (e) {}
           return;
         }
-        console.log(
-          `Successfully using reference space from Three.js (requested 'local').`
-        );
-        infoDivElement.textContent = `Using main space. Setting up hit test...`;
+        console.log(`Using reference space from Three.js (requested 'local').`);
 
-        // --- Request Hit Test Source ---
+        // Setup hit testing
         hitTestSource = null;
         hitTestSourceRequested = false;
         try {
-          console.log("Attempting 'viewer' space for hit test setup");
+          /* ... same logic to get hit test source ... */
+          console.log("Attempting 'viewer' space for hit test");
           const viewerSpace = await session.requestReferenceSpace('viewer');
-          console.log("Got 'viewer' space for hit test setup.");
+          console.log("Got 'viewer' space.");
           console.log('Attempting hit test source...');
           hitTestSource = await session.requestHitTestSource({
             space: viewerSpace,
           });
           hitTestSourceRequested = true;
-          console.log('Hit test source obtained successfully.');
-          infoDivElement.textContent =
-            'AR Ready. Point at surface & tap to place marker.';
+          console.log('Hit test source obtained.');
         } catch (err) {
-          console.error(`Error during hit test setup: ${err.message}`);
-          infoDivElement.textContent = `Main space OK, but Hit-Test setup failed: ${err.message}`;
+          console.error(`Hit test setup error: ${err.message}`);
+          infoDivElement.textContent = `Warning: Hit-Test setup failed: ${err.message}`;
           hitTestSourceRequested = false;
-          console.warn('Proceeding without hit testing.');
         }
 
-        // --- Start Render Loop ---
+        // Start measurement process
+        resetMeasurement(false); // Reset state without ending session
+        measurementState = 'waiting_bl'; // Start waiting for bottom-left
+        updateInstructions();
+        resetButtonElement.style.display = 'inline-block'; // Show Reset button
+        startButtonElement.style.display = 'none'; // Hide Start button
+
+        // Start Render Loop
         if (referenceSpace) {
           renderer.setAnimationLoop(onXRFrame);
           console.log('Three.js Render Loop started.');
         } else {
-          console.error(
-            'Cannot start render loop without referenceSpace from Three.js.'
-          );
+          console.error('Cannot start render loop without referenceSpace.');
         }
       }
 
@@ -337,40 +374,100 @@
         hitTestSourceRequested = false;
         hitTestSource = null;
         referenceSpace = null;
-        placedMarkers.forEach((marker) => {
-          scene.remove(marker);
-        });
-        placedMarkers = [];
+        // Stop loop FIRST
         try {
           renderer.setAnimationLoop(null);
           console.log('Three.js Render Loop stopped.');
         } catch (error) {
           console.error('Error stopping loop:', error);
         }
-        infoDivElement.textContent = 'AR Session ended. Click Start again.';
-        startButtonElement.style.display = 'block';
-        startButtonElement.disabled = false;
+        // Then reset state
+        resetMeasurement(true); // Full reset including button states
         console.log('AR Session Ended.');
       }
 
       function onWindowResize() {
-        if (!renderer.xr.isPresenting) {
-          camera.aspect = window.innerWidth / window.innerHeight;
-          camera.updateProjectionMatrix();
-          renderer.setSize(window.innerWidth, window.innerHeight);
-        }
+        /* ... unchanged ... */
       }
-
       function onSelect(event) {
         console.log('Select event detected.');
         selectEventPending = true;
       }
 
+      // --- Reset Measurement State ---
+      function resetMeasurement(isSessionEnding = false) {
+        console.log('Resetting measurement...');
+        // Clear stored points
+        cornerPoints.bl = null;
+        cornerPoints.br = null;
+        cornerPoints.tl = null;
+        // Remove visual markers
+        placedMarkers.forEach((marker) => {
+          scene.remove(marker);
+        });
+        placedMarkers = [];
+
+        // Reset state and UI
+        if (isSessionEnding) {
+          measurementState = 'idle';
+          startButtonElement.disabled = !navigator.xr; // Re-enable if XR supported
+          startButtonElement.style.display = 'inline-block';
+          resetButtonElement.style.display = 'none';
+        } else if (currentSession) {
+          // If resetting during active session, go back to first step
+          measurementState = 'waiting_bl';
+          resetButtonElement.style.display = 'inline-block'; // Ensure reset stays visible
+          startButtonElement.style.display = 'none'; // Keep start hidden
+        }
+        updateInstructions();
+      }
+
+      // --- Update Instructions UI ---
+      function updateInstructions() {
+        switch (measurementState) {
+          case 'idle':
+            infoDivElement.textContent = 'Click "Start Measurement" to begin.';
+            break;
+          case 'waiting_bl':
+            infoDivElement.textContent =
+              'Aim and Tap the FRONT BOTTOM-LEFT corner.';
+            break;
+          case 'waiting_br':
+            infoDivElement.textContent = 'Tap the FRONT BOTTOM-RIGHT corner.';
+            break;
+          case 'waiting_tl':
+            infoDivElement.textContent = 'Tap the FRONT TOP-LEFT corner.';
+            break;
+          // Add case for 'waiting_back' later
+          case 'done':
+            // TODO: Display calculated dimensions
+            infoDivElement.textContent =
+              'Measurement points collected. Click Reset.';
+            break;
+          case 'error':
+            // Keep error message set previously
+            break;
+          default:
+            infoDivElement.textContent = 'Initializing...';
+        }
+        // Update button text/state if needed
+        if (currentSession) {
+          startButtonElement.style.display = 'none';
+          resetButtonElement.style.display = 'inline-block';
+        } else {
+          startButtonElement.textContent = 'Start Measurement';
+          resetButtonElement.style.display = 'none';
+        }
+      }
+
+      // --- onXRFrame - Render Loop ---
       function onXRFrame(timestamp, frame) {
         if (!frame) {
           return;
         }
-        latestHitPoseMatrix = null;
+        latestHitPoseMatrix = null; // Reset hit pose for this frame
+
+        // --- Get Hit Test Results ---
         if (hitTestSourceRequested && hitTestSource && referenceSpace) {
           try {
             const hitTestResults = frame.getHitTestResults(hitTestSource);
@@ -385,17 +482,62 @@
             /* Ignore */
           }
         }
+
+        // --- Process Pending Select Event Based on State ---
         if (selectEventPending) {
-          console.log('Processing select...');
+          console.log(`Processing select in state: ${measurementState}`);
           if (latestHitPoseMatrix) {
-            console.log('Placing marker...');
-            placeMarker(latestHitPoseMatrix);
+            // Place a marker visually
+            const markerPosition = placeMarker(latestHitPoseMatrix); // placeMarker now returns position
+
+            // Store point based on current state
+            let pointStored = false;
+            switch (measurementState) {
+              case 'waiting_bl':
+                cornerPoints.bl = markerPosition;
+                measurementState = 'waiting_br';
+                pointStored = true;
+                break;
+              case 'waiting_br':
+                cornerPoints.br = markerPosition;
+                measurementState = 'waiting_tl';
+                pointStored = true;
+                break;
+              case 'waiting_tl':
+                cornerPoints.tl = markerPosition;
+                measurementState = 'done'; // For now, stop after 3 points
+                // TODO: Later change to 'waiting_back' or similar
+                pointStored = true;
+                break;
+              // Add case for 'waiting_back' later
+            }
+
+            if (pointStored) {
+              console.log(
+                'Stored point for state:',
+                Object.keys(cornerPoints).find(
+                  (key) => cornerPoints[key] === markerPosition
+                )
+              );
+              updateInstructions(); // Update instructions for next step
+              // TODO: Add distance calculation and box drawing when 'done'
+            } else {
+              console.log(
+                'Tap occurred in unexpected state:',
+                measurementState
+              );
+            }
           } else {
-            infoDivElement.textContent = 'Tap processed, no surface hit.';
+            // No hit detected on tap
+            infoDivElement.textContent += ' (No surface hit!)'; // Append feedback
             console.log('No hit pose on tap.');
+            // Briefly show feedback then revert?
+            setTimeout(() => updateInstructions(), 1000);
           }
-          selectEventPending = false;
+          selectEventPending = false; // Reset flag
         }
+
+        // --- Render ---
         try {
           renderer.render(scene, camera);
         } catch (error) {
@@ -403,20 +545,22 @@
         }
       }
 
+      // --- Place Marker Helper (Now returns position) ---
       function placeMarker(matrixArray) {
         const geometry = new THREE.SphereGeometry(0.02, 16, 16);
+        // Use different colors per state? Optional.
         const material = new THREE.MeshStandardMaterial({
-          color: 0xff0000,
+          color: 0x00ff00,
           roughness: 0.4,
           metalness: 0.1,
-        });
+        }); // Green markers
         const marker = new THREE.Mesh(geometry, material);
         marker.matrix.fromArray(matrixArray);
         marker.matrix.decompose(
           marker.position,
           marker.quaternion,
           marker.scale
-        );
+        ); // Get position vector
         marker.scale.set(1, 1, 1);
         scene.add(marker);
         placedMarkers.push(marker);
@@ -426,11 +570,7 @@
           marker.position.y.toFixed(3),
           marker.position.z.toFixed(3)
         );
-        if (placedMarkers.length === 1) {
-          infoDivElement.textContent = 'First marker placed. Tap again.';
-        } else if (placedMarkers.length >= 2) {
-          infoDivElement.textContent = `${placedMarkers.length} markers placed.`;
-        }
+        return marker.position.clone(); // Return a copy of the position vector
       }
 
       // --- Start the application ---
@@ -438,9 +578,7 @@
         console.log('DOM Ready.');
         init();
       });
-      console.log(
-        '--- JS module execution finished (Local Hint Corrected) ---'
-      );
+      console.log('--- JS module execution finished (User Guided Taps) ---');
     </script>
     <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
     <script>
