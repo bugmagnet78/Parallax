@@ -130,6 +130,7 @@
 
       async function init() {
         console.log('init() called');
+        // --- Ensure Elements Exist ---
         if (
           !infoDivElement ||
           !startButtonElement ||
@@ -143,10 +144,11 @@
           infoDivElement.textContent =
             'Error: Required elements or MediaPipe Objectron not loaded.';
           if (startButtonElement) startButtonElement.disabled = true;
-          return; // OK Return
+          return; // Stop initialization
         }
 
         infoDivElement.textContent = 'Setting up Scene & Renderer...';
+        // --- Three.js Setup ---
         try {
           scene = new THREE.Scene();
           camera = new THREE.PerspectiveCamera(
@@ -155,7 +157,6 @@
             0.01,
             40
           );
-          // Re-adding antialias: true as it wasn't the cause of the previous error
           renderer = new THREE.WebGLRenderer({
             canvas: canvasElement,
             antialias: true,
@@ -174,44 +175,69 @@
             new THREE.Vector3(-0.1, -0.1, -0.1),
             new THREE.Vector3(0.1, 0.1, 0.1)
           );
-          objectronBoundingBox = new THREE.Box3Helper(initialBox, 0xffff00); // Yellow
+          objectronBoundingBox = new THREE.Box3Helper(initialBox, 0xffff00);
           objectronBoundingBox.visible = false;
           scene.add(objectronBoundingBox);
           console.log('Objectron bounding box helper created.');
         } catch (error) {
           console.error('Init Error:', error);
           displayCompatibilityError('3D Setup failed: ' + error.message);
-          return; // OK Return
+          return;
         }
 
+        // --- MediaPipe Objectron Setup ---
         infoDivElement.textContent = 'Loading Objectron Model...';
         try {
           objectron = new Objectron({
             locateFile: (file) => {
               console.log(`Locating file: ${file}`);
-              // Assuming WASM files are in this path for the legacy Objectron package
-              return `https://cdn.jsdelivr.net/npm/@mediapipe/objectron@0.4/${file}`;
+              // *** CHANGE: Consistently use the older v0.4 path ***
+              const objectronBasePath =
+                'https://cdn.jsdelivr.net/npm/@mediapipe/objectron@0.4/';
+              // Check if the file requested is one of the core WASM/data files
+              // This might need adjustment based on exact filenames Objectron requests
+              if (
+                file.endsWith('.wasm') ||
+                file.endsWith('.data') ||
+                file.endsWith('.js') ||
+                file.endsWith('.binarypb')
+              ) {
+                return `${objectronBasePath}${file}`;
+              }
+              // Otherwise, assume it might be a model file (if not bundled)
+              // If models are separate, you might need logic to return their specific path here.
+              // For now, assume models are loaded implicitly or bundled within the main files.
+              console.warn(
+                `Unsure how to locate model file: ${file}, assuming bundled.`
+              );
+              // Return the base path anyway, maybe it resolves internally?
+              return `${objectronBasePath}${file}`;
             },
           });
           console.log('Objectron instance created.');
 
           objectron.setOptions({
             staticImageMode: false,
+            // --- IMPORTANT: Ensure this matches the object you test ---
             modelName: 'Shoe', // Or 'Chair', 'Cup', 'Camera'
+            //---------------------------------------------------------
             maxNumObjects: 1,
             minDetectionConfidence: 0.5,
             minTrackingConfidence: 0.7,
           });
-          console.log('Objectron options set (Model: Shoe).');
+          console.log(
+            `Objectron options set (Model: ${objectron.options.modelName}).`
+          ); // Log the model used
 
           objectron.onResults(onObjectronResults);
           console.log('Objectron results callback set.');
         } catch (error) {
           console.error('MediaPipe Init Error:', error);
           displayCompatibilityError('MediaPipe setup failed: ' + error.message);
-          return; // OK Return
+          return;
         }
 
+        // --- Camera Setup ---
         infoDivElement.textContent = 'Setting up Camera...';
         try {
           cameraHelper = new Camera(videoElement, {
@@ -227,12 +253,116 @@
         } catch (error) {
           console.error('Camera Setup Error:', error);
           displayCompatibilityError('Camera setup failed: ' + error.message);
-          return; // OK Return
+          return;
         }
 
+        // --- Check WebXR Support ---
         checkXRSupport();
         window.addEventListener('resize', onWindowResize, false);
       }
+      console.log('init() called');
+      if (
+        !infoDivElement ||
+        !startButtonElement ||
+        !canvasElement ||
+        !videoElement ||
+        !window.Objectron
+      ) {
+        console.error(
+          'FATAL: UI/Canvas/Video/Objectron missing or MP not loaded.'
+        );
+        infoDivElement.textContent =
+          'Error: Required elements or MediaPipe Objectron not loaded.';
+        if (startButtonElement) startButtonElement.disabled = true;
+        return; // OK Return
+      }
+
+      infoDivElement.textContent = 'Setting up Scene & Renderer...';
+      try {
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(
+          70,
+          window.innerWidth / window.innerHeight,
+          0.01,
+          40
+        );
+        // Re-adding antialias: true as it wasn't the cause of the previous error
+        renderer = new THREE.WebGLRenderer({
+          canvas: canvasElement,
+          antialias: true,
+          alpha: true,
+        });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.xr.enabled = true;
+        console.log('Three.js Renderer initialized, XR enabled.');
+        const light = new THREE.AmbientLight(0xffffff, 1.0);
+        scene.add(light);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+        dirLight.position.set(1, 1, 1);
+        scene.add(dirLight);
+        const initialBox = new THREE.Box3(
+          new THREE.Vector3(-0.1, -0.1, -0.1),
+          new THREE.Vector3(0.1, 0.1, 0.1)
+        );
+        objectronBoundingBox = new THREE.Box3Helper(initialBox, 0xffff00); // Yellow
+        objectronBoundingBox.visible = false;
+        scene.add(objectronBoundingBox);
+        console.log('Objectron bounding box helper created.');
+      } catch (error) {
+        console.error('Init Error:', error);
+        displayCompatibilityError('3D Setup failed: ' + error.message);
+        return; // OK Return
+      }
+
+      infoDivElement.textContent = 'Loading Objectron Model...';
+      try {
+        objectron = new Objectron({
+          locateFile: (file) => {
+            console.log(`Locating file: ${file}`);
+            // Assuming WASM files are in this path for the legacy Objectron package
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/objectron@0.4/${file}`;
+          },
+        });
+        console.log('Objectron instance created.');
+
+        objectron.setOptions({
+          staticImageMode: false,
+          modelName: 'Shoe', // Or 'Chair', 'Cup', 'Camera'
+          maxNumObjects: 1,
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.7,
+        });
+        console.log('Objectron options set (Model: Shoe).');
+
+        objectron.onResults(onObjectronResults);
+        console.log('Objectron results callback set.');
+      } catch (error) {
+        console.error('MediaPipe Init Error:', error);
+        displayCompatibilityError('MediaPipe setup failed: ' + error.message);
+        return; // OK Return
+      }
+
+      infoDivElement.textContent = 'Setting up Camera...';
+      try {
+        cameraHelper = new Camera(videoElement, {
+          onFrame: async () => {
+            await objectron.send({ image: videoElement });
+          },
+          width: 640,
+          height: 480,
+        });
+        await cameraHelper.start();
+        console.log('MediaPipe Camera util started.');
+        infoDivElement.textContent = 'Camera OK. Checking WebXR...';
+      } catch (error) {
+        console.error('Camera Setup Error:', error);
+        displayCompatibilityError('Camera setup failed: ' + error.message);
+        return; // OK Return
+      }
+
+      checkXRSupport();
+      window.addEventListener('resize', onWindowResize, false);
 
       function onObjectronResults(results) {
         if (results.objectDetections && results.objectDetections.length > 0) {
