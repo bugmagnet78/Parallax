@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, user-scalable=no"
     />
-    <title>WebXR Measurement - Box + Undo</title>
+    <title>WebXR Measurement - Box + Undo (Corrected)</title>
     <style>
       /* CSS styles */
       body {
@@ -38,10 +38,10 @@
         z-index: 101;
         display: flex;
         justify-content: center;
-        gap: 15px; /* Reduced gap */
+        gap: 15px;
       }
       .button-container button {
-        padding: 12px 24px; /* Slightly smaller */
+        padding: 12px 24px;
         font-size: 16px;
         background-color: #007bff;
         color: white;
@@ -69,11 +69,10 @@
       #undo-button {
         background-color: #ffc107;
         color: black;
-      } /* Yellow for Undo */
+      }
       #undo-button:hover:not(:disabled) {
         background-color: #e0a800;
       }
-
       canvas {
         display: block;
         position: absolute;
@@ -104,7 +103,9 @@
     <canvas id="webgl-canvas"></canvas>
 
     <script type="module">
-      console.log('--- JavaScript module execution started (Box + Undo) ---');
+      console.log(
+        '--- JavaScript module execution started (Box + Undo - Corrected) ---'
+      );
 
       import * as THREE from 'three';
 
@@ -114,7 +115,7 @@
       );
 
       // --- Relevant Context ---
-      // Current time: Sunday, March 30, 2025 at 6:43 AM
+      // Current time: Sunday, March 30, 2025 at 6:51 AM
       // Location: Kochi, Kerala, India
 
       // Global variables
@@ -125,18 +126,17 @@
       let referenceSpace = null;
       let latestHitPoseMatrix = null;
       let selectEventPending = false;
-      let placedMarkers = []; // Holds THREE.Mesh marker objects
+      let placedMarkers = [];
       let lineGeometry = null;
       let lineMaterial = null;
-      let measurementLines = null; // For bounding box
+      let measurementLines = null;
       let measurementState = 'idle';
       let cornerPoints = { bl: null, br: null, tl: null };
 
-      // Get UI elements
       const infoDivElement = document.getElementById('info');
       const startButtonElement = document.getElementById('start-ar-button');
       const resetButtonElement = document.getElementById('reset-button');
-      const undoButtonElement = document.getElementById('undo-button'); // Get Undo button
+      const undoButtonElement = document.getElementById('undo-button');
       const canvasElement = document.getElementById('webgl-canvas');
 
       // --- Function Definitions (Defined ONCE) ---
@@ -150,7 +150,6 @@
           !resetButtonElement ||
           !undoButtonElement
         ) {
-          // Check undo button
           console.error('FATAL: UI/Canvas element missing.');
           alert('UI Error.');
           return;
@@ -167,7 +166,7 @@
           renderer = new THREE.WebGLRenderer({
             canvas: canvasElement,
             alpha: true,
-          }); // No AA
+          });
           renderer.setPixelRatio(window.devicePixelRatio);
           renderer.setSize(window.innerWidth, window.innerHeight);
           renderer.xr.enabled = true;
@@ -181,7 +180,7 @@
           lineMaterial = new THREE.LineBasicMaterial({
             color: 0x00ffff,
             linewidth: 3,
-          }); // Cyan lines, slightly thicker
+          });
           measurementLines = new THREE.LineSegments(lineGeometry, lineMaterial);
           measurementLines.visible = false;
           scene.add(measurementLines);
@@ -191,11 +190,8 @@
           displayCompatibilityError('3D Setup failed.');
           return;
         }
-
-        // Add event listeners
         resetButtonElement.addEventListener('click', resetMeasurement);
-        undoButtonElement.addEventListener('click', undoLastPoint); // Listener for Undo
-
+        undoButtonElement.addEventListener('click', undoLastPoint);
         infoDivElement.textContent = 'Checking WebXR support...';
         checkXRSupport();
         window.addEventListener('resize', onWindowResize, false);
@@ -203,7 +199,6 @@
       }
 
       async function checkXRSupport() {
-        // (Unchanged - checks 'immersive-ar' & 'hit-test', enables button via listener)
         console.log('checkXRSupport() called.');
         infoDivElement.textContent = 'Checking WebXR capabilities...';
         console.log('navigator.xr:', navigator.xr);
@@ -270,7 +265,6 @@
       }
 
       async function startARSession() {
-        // (Unchanged - requests session)
         infoDivElement.textContent = 'Starting AR session...';
         startButtonElement.disabled = true;
         startButtonElement.style.display = 'none';
@@ -299,7 +293,6 @@
       }
 
       async function onSessionStarted(session) {
-        // (Unchanged - Sets up session, reference space, hit test)
         console.log('onSessionStarted called.');
         session.addEventListener('end', onSessionEnded);
         session.addEventListener('select', onSelect);
@@ -346,13 +339,9 @@
           infoDivElement.textContent = `Warning: Hit-Test setup failed: ${err.message}`;
           hitTestSourceRequested = false;
         }
-
-        // Start measurement process
         resetMeasurement(false);
         measurementState = 'waiting_bl';
         updateInstructions();
-        // Button visibility managed by updateInstructions now
-
         if (referenceSpace) {
           renderer.setAnimationLoop(onXRFrame);
           console.log('Three.js Render Loop started.');
@@ -362,7 +351,6 @@
       }
 
       function onSessionEnded(/*event*/) {
-        // (Unchanged - stops loop, resets state)
         console.log('onSessionEnded called.');
         currentSession?.removeEventListener('select', onSelect);
         currentSession = null;
@@ -392,7 +380,6 @@
         selectEventPending = true;
       }
 
-      // --- Reset Measurement State ---
       function resetMeasurement(isSessionEnding = false) {
         console.log('Resetting measurement...');
         cornerPoints.bl = null;
@@ -403,64 +390,57 @@
         });
         placedMarkers = [];
         updateBoundingBox(cornerPoints); // Update lines (will hide them)
-
         if (isSessionEnding) {
           measurementState = 'idle';
         } else if (currentSession) {
           measurementState = 'waiting_bl';
         }
-        updateInstructions(); // Also handles button visibility
+        updateInstructions();
       }
 
-      // --- NEW: Undo Last Point ---
       function undoLastPoint() {
         console.log('Undo requested. Current state:', measurementState);
         let pointRemoved = false;
         let lastMarker = null;
-
         switch (measurementState) {
-          case 'done': // Was waiting for 'back' or just finished TL
+          case 'done':
             if (cornerPoints.tl) {
-              console.log('Undoing TL point');
+              console.log('Undoing TL');
               cornerPoints.tl = null;
               measurementState = 'waiting_tl';
               lastMarker = placedMarkers.pop();
               pointRemoved = true;
             }
             break;
-          case 'waiting_tl': // Was waiting for TL, means BR was last placed
+          case 'waiting_tl':
             if (cornerPoints.br) {
-              console.log('Undoing BR point');
+              console.log('Undoing BR');
               cornerPoints.br = null;
               measurementState = 'waiting_br';
               lastMarker = placedMarkers.pop();
               pointRemoved = true;
             }
             break;
-          case 'waiting_br': // Was waiting for BR, means BL was last placed
+          case 'waiting_br':
             if (cornerPoints.bl) {
-              console.log('Undoing BL point');
+              console.log('Undoing BL');
               cornerPoints.bl = null;
               measurementState = 'waiting_bl';
               lastMarker = placedMarkers.pop();
               pointRemoved = true;
             }
             break;
-          // case 'waiting_bl': // Cannot undo if no points placed
-          // break;
         }
-
         if (pointRemoved && lastMarker) {
-          scene.remove(lastMarker); // Remove marker mesh from scene
-          updateBoundingBox(cornerPoints); // Update lines
-          updateInstructions(); // Update text and buttons
+          scene.remove(lastMarker);
+          updateBoundingBox(cornerPoints);
+          updateInstructions();
           console.log('Undo successful. New state:', measurementState);
         } else {
           console.log('Undo failed or nothing to undo.');
         }
       }
 
-      // --- Update Instructions UI ---
       function updateInstructions() {
         let text = '';
         let undoVisible = false;
@@ -472,15 +452,15 @@
             break;
           case 'waiting_bl':
             text = 'Aim and Tap the FRONT BOTTOM-LEFT corner.';
-            break; // No undo here
+            break;
           case 'waiting_br':
             text = 'Tap the FRONT BOTTOM-RIGHT corner.';
             undoVisible = true;
-            break; // Can undo BL
+            break;
           case 'waiting_tl':
             text = 'Tap the FRONT TOP-LEFT corner.';
             undoVisible = true;
-            break; // Can undo BR
+            break;
           case 'done':
             const dimensions = calculateDimensions(cornerPoints);
             if (dimensions) {
@@ -490,7 +470,7 @@
             } else {
               text = 'Points collected, calculation failed. Click Reset.';
             }
-            undoVisible = true; // Can undo TL
+            undoVisible = true;
             break;
           case 'error':
             text = infoDivElement.textContent;
@@ -499,14 +479,12 @@
             text = 'Initializing...';
         }
         infoDivElement.textContent = text;
-
-        // Update button visibility
         if (currentSession) {
           startButtonElement.style.display = 'none';
           resetButtonElement.style.display = 'inline-block';
           undoButtonElement.style.display = undoVisible
             ? 'inline-block'
-            : 'none'; // Show/hide Undo
+            : 'none';
         } else {
           startButtonElement.textContent = 'Start Measurement';
           startButtonElement.style.display = 'inline-block';
@@ -515,174 +493,6 @@
         }
       }
 
-      // Calculate Dimensions (Unchanged)
-      function calculateDimensions(points) {
-        /* ... same as before ... */
-      }
-
-      // --- UPDATED: Draw Bounding Box (Front Face Only) ---
-      function updateBoundingBox(points) {
-        const vertices = [];
-        let boxVisible = false;
-
-        if (points.bl && points.br && points.tl) {
-          // Calculate the 4th corner (Top Right - TR) assuming parallelogram
-          const p0 = points.bl; // Vector3
-          const p1 = points.br; // Vector3
-          const p2 = points.tl; // Vector3
-          // Vector p0->p1 (width vector)
-          const vW = new THREE.Vector3().subVectors(p1, p0);
-          // Vector p0->p2 (height vector) - Assuming orthogonal for simplicity now
-          // const vH = new THREE.Vector3().subVectors(p2, p0); // Less robust if not square on
-          // Better: TR = BR + (TL - BL) => p3 = p1 + (p2 - p0)
-          const p3 = new THREE.Vector3().addVectors(
-            p1,
-            new THREE.Vector3().subVectors(p2, p0)
-          );
-
-          // Define edges: BL-BR, BR-TR, TR-TL, TL-BL
-          vertices.push(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z); // BL -> BR
-          vertices.push(p1.x, p1.y, p1.z, p3.x, p3.y, p3.z); // BR -> TR
-          vertices.push(p3.x, p3.y, p3.z, p2.x, p2.y, p2.z); // TR -> TL
-          vertices.push(p2.x, p2.y, p2.z, p0.x, p0.y, p0.z); // TL -> BL
-
-          boxVisible = true;
-          console.log('Calculated 4 corners for bounding box face.');
-        }
-        // Hide lines if fewer than 3 points
-        else if (points.bl && points.br) {
-          // Draw just BL-BR if 2 points
-          vertices.push(points.bl.x, points.bl.y, points.bl.z);
-          vertices.push(points.br.x, points.br.y, points.br.z);
-          boxVisible = true;
-        } else if (points.bl && points.tl) {
-          // Draw just BL-TL if BR was undone
-          vertices.push(points.bl.x, points.bl.y, points.bl.z);
-          vertices.push(points.tl.x, points.tl.y, points.tl.z);
-          boxVisible = true;
-        }
-
-        if (boxVisible) {
-          lineGeometry.setAttribute(
-            'position',
-            new THREE.Float32BufferAttribute(vertices, 3)
-          );
-          lineGeometry.computeBoundingSphere();
-          measurementLines.visible = true;
-          console.log(
-            `Updated bounding box lines with ${vertices.length / 3} vertices.`
-          );
-        } else {
-          // Clear geometry data and hide
-          lineGeometry.deleteAttribute('position');
-          measurementLines.visible = false;
-          console.log('Hid bounding box lines.');
-        }
-      }
-
-      // onXRFrame (State processing logic is same, calls updated box func)
-      function onXRFrame(timestamp, frame) {
-        if (!frame) {
-          return;
-        }
-        latestHitPoseMatrix = null;
-        if (hitTestSourceRequested && hitTestSource && referenceSpace) {
-          try {
-            const results = frame.getHitTestResults(hitTestSource);
-            if (results.length > 0) {
-              const hit = results[0];
-              const pose = hit.getPose(referenceSpace);
-              if (pose) {
-                latestHitPoseMatrix = pose.transform.matrix;
-              }
-            }
-          } catch (e) {}
-        }
-
-        if (selectEventPending) {
-          console.log(`Processing select in state: ${measurementState}`);
-          if (latestHitPoseMatrix) {
-            const markerPosition = placeMarker(latestHitPoseMatrix);
-            if (!markerPosition) {
-              throw new Error('placeMarker failed');
-            } // Should not happen
-            let pointStored = false;
-            let justCompleted = false;
-            console.log('Entering state switch for:', measurementState);
-            switch (measurementState) {
-              case 'waiting_bl':
-                console.log('State matched: waiting_bl');
-                cornerPoints.bl = markerPosition;
-                measurementState = 'waiting_br';
-                pointStored = true;
-                break;
-              case 'waiting_br':
-                console.log('State matched: waiting_br');
-                cornerPoints.br = markerPosition;
-                measurementState = 'waiting_tl';
-                pointStored = true;
-                break;
-              case 'waiting_tl':
-                console.log('State matched: waiting_tl');
-                cornerPoints.tl = markerPosition;
-                measurementState = 'done';
-                pointStored = true;
-                justCompleted = true;
-                break;
-              default:
-                console.warn('Tap in unexpected state:', measurementState);
-                break;
-            }
-            if (pointStored) {
-              console.log('Stored point. New state:', measurementState);
-              updateBoundingBox(cornerPoints);
-              updateInstructions();
-              if (justCompleted) {
-                console.log('Measurement points complete.');
-              }
-            } // Call updateBoundingBox
-            else {
-              console.log('Point not stored.');
-              if (measurementState === 'done') {
-                updateInstructions();
-              }
-            } // Update instructions if tapped in 'done' state
-          } else {
-            console.log('No hit pose found for tap.');
-            const ci = infoDivElement.textContent;
-            if (!ci.endsWith('(No surface hit!)')) {
-              infoDivElement.textContent = ci + ' (No surface hit!)';
-            }
-            setTimeout(() => {
-              const em = ci + ' (No surface hit!)';
-              if (infoDivElement.textContent === em) {
-                updateInstructions();
-              }
-            }, 1500);
-          }
-          selectEventPending = false;
-          console.log('selectEventPending reset.');
-        }
-        try {
-          renderer.render(scene, camera);
-        } catch (error) {
-          console.error('Render error:', error);
-        }
-      }
-
-      // placeMarker (Unchanged - returns position)
-      function placeMarker(matrixArray) {
-        /* ... same as before ... */
-      }
-
-      // --- Start the application ---
-      document.addEventListener('DOMContentLoaded', () => {
-        console.log('DOM Ready.');
-        init();
-      });
-      console.log('--- JS module execution finished (Box + Undo) ---');
-
-      // --- Final check for missing functions ---
       function calculateDimensions(points) {
         if (points.bl && points.br && points.tl) {
           try {
@@ -697,14 +507,194 @@
         }
         return null;
       }
+
+      function updateBoundingBox(points) {
+        const vertices = [];
+        let boxVisible = false;
+        if (points.bl && points.br && points.tl) {
+          const p0 = points.bl;
+          const p1 = points.br;
+          const p2 = points.tl;
+          const p3 = new THREE.Vector3().addVectors(
+            p1,
+            new THREE.Vector3().subVectors(p2, p0)
+          ); // TR = BR + (TL - BL)
+          vertices.push(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z); // BL -> BR
+          vertices.push(p1.x, p1.y, p1.z, p3.x, p3.y, p3.z); // BR -> TR
+          vertices.push(p3.x, p3.y, p3.z, p2.x, p2.y, p2.z); // TR -> TL
+          vertices.push(p2.x, p2.y, p2.z, p0.x, p0.y, p0.z); // TL -> BL
+          boxVisible = true;
+          console.log('Calculated 4 corners for bounding box face.');
+        } else if (points.bl && points.br) {
+          vertices.push(
+            points.bl.x,
+            points.bl.y,
+            points.bl.z,
+            points.br.x,
+            points.br.y,
+            points.br.z
+          );
+          boxVisible = true;
+        } else if (points.bl && points.tl) {
+          vertices.push(
+            points.bl.x,
+            points.bl.y,
+            points.bl.z,
+            points.tl.x,
+            points.tl.y,
+            points.tl.z
+          );
+          boxVisible = true;
+        }
+
+        if (boxVisible) {
+          lineGeometry.setAttribute(
+            'position',
+            new THREE.Float32BufferAttribute(vertices, 3)
+          );
+          lineGeometry.computeBoundingSphere();
+          measurementLines.visible = true;
+          console.log(
+            `Updated bounding box lines with ${vertices.length / 3} vertices.`
+          );
+        } else {
+          if (lineGeometry.getAttribute('position'))
+            lineGeometry.deleteAttribute('position');
+          measurementLines.visible = false;
+          console.log('Hid bounding box lines.');
+        } // Clear geometry when hiding
+      }
+
+      function onXRFrame(timestamp, frame) {
+        if (!frame) {
+          return;
+        }
+        try {
+          // Wrap main logic
+          latestHitPoseMatrix = null;
+          if (hitTestSourceRequested && hitTestSource && referenceSpace) {
+            try {
+              const results = frame.getHitTestResults(hitTestSource);
+              if (results.length > 0) {
+                const hit = results[0];
+                const pose = hit.getPose(referenceSpace);
+                if (pose) {
+                  latestHitPoseMatrix = pose.transform.matrix;
+                }
+              }
+            } catch (hitError) {
+              console.warn('Minor hit test error:', hitError.message);
+            }
+          }
+          if (selectEventPending) {
+            console.log(
+              `DEBUG: Processing select in state: ${measurementState}`
+            );
+            if (latestHitPoseMatrix) {
+              console.log('DEBUG: Hit detected! Calling placeMarker...');
+              const markerPosition = placeMarker(latestHitPoseMatrix);
+              console.log(
+                'DEBUG: placeMarker returned position:',
+                markerPosition
+              );
+              if (!markerPosition) {
+                throw new Error('placeMarker failed');
+              }
+              let pointStored = false;
+              let justCompleted = false;
+              console.log(
+                'DEBUG: Entering state switch for:',
+                measurementState
+              );
+              switch (measurementState) {
+                case 'waiting_bl':
+                  console.log('DEBUG: State matched: waiting_bl');
+                  cornerPoints.bl = markerPosition;
+                  measurementState = 'waiting_br';
+                  pointStored = true;
+                  break;
+                case 'waiting_br':
+                  console.log('DEBUG: State matched: waiting_br');
+                  cornerPoints.br = markerPosition;
+                  measurementState = 'waiting_tl';
+                  pointStored = true;
+                  break;
+                case 'waiting_tl':
+                  console.log('DEBUG: State matched: waiting_tl');
+                  cornerPoints.tl = markerPosition;
+                  measurementState = 'done';
+                  pointStored = true;
+                  justCompleted = true;
+                  break;
+                default:
+                  console.warn(
+                    'DEBUG: Tap in unexpected state:',
+                    measurementState
+                  );
+                  break;
+              }
+              if (pointStored) {
+                console.log(
+                  'DEBUG: Stored point. New state:',
+                  measurementState
+                );
+                console.log(
+                  'DEBUG: Calling updateBoundingBox/updateInstructions...'
+                );
+                updateBoundingBox(cornerPoints);
+                updateInstructions();
+                if (justCompleted) {
+                  console.log('DEBUG: Measurement points complete.');
+                }
+              } else {
+                console.log('DEBUG: Point not stored.');
+                if (measurementState === 'done') {
+                  updateInstructions();
+                }
+              }
+            } else {
+              console.log('DEBUG: No hit pose found for tap.');
+              const ci = infoDivElement.textContent;
+              if (!ci.endsWith('(No surface hit!)')) {
+                infoDivElement.textContent = ci + ' (No surface hit!)';
+              }
+              setTimeout(() => {
+                const em = ci + ' (No surface hit!)';
+                if (infoDivElement.textContent === em) {
+                  updateInstructions();
+                }
+              }, 1500);
+            }
+            selectEventPending = false;
+            console.log('DEBUG: selectEventPending reset.');
+          }
+          renderer.render(scene, camera);
+        } catch (error) {
+          console.error(
+            '!!!!!!!!!!!!!!!! ERROR INSIDE onXRFrame !!!!!!!!!!!!!!!!'
+          );
+          console.error(error);
+          console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+          if (currentSession) {
+            console.log('Ending session due to frame error...');
+            currentSession
+              .end()
+              .catch((endErr) =>
+                console.error('Error ending session post-error:', endErr)
+              );
+          }
+          return;
+        }
+      }
+
       function placeMarker(matrixArray) {
-        const g = new THREE.SphereGeometry(0.02, 16, 16);
-        const m = new THREE.MeshStandardMaterial({
+        const geometry = new THREE.SphereGeometry(0.02, 16, 16);
+        const material = new THREE.MeshStandardMaterial({
           color: 0x00ff00,
           roughness: 0.4,
           metalness: 0.1,
         });
-        const marker = new THREE.Mesh(g, m);
+        const marker = new THREE.Mesh(geometry, material);
         marker.matrix.fromArray(matrixArray);
         marker.matrix.decompose(
           marker.position,
@@ -722,6 +712,15 @@
         );
         return marker.position.clone();
       }
+
+      // --- Start the application ---
+      document.addEventListener('DOMContentLoaded', () => {
+        console.log('DOM Ready.');
+        init();
+      });
+      console.log(
+        '--- JS module execution finished (Box + Undo - Corrected) ---'
+      );
     </script>
     <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
     <script>
