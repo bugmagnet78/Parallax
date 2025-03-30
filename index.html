@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, user-scalable=no"
     />
-    <title>WebXR + MediaPipe Objectron Test</title>
+    <title>WebXR + MediaPipe Objectron (Corrected)</title>
     <style>
       body {
         margin: 0;
@@ -67,7 +67,7 @@
       }
       video#input-video {
         display: none;
-      } /* Hide the video element used for input */
+      }
     </style>
 
     <script type="importmap">
@@ -92,10 +92,12 @@
     <div class="button-container">
       <button id="start-ar-button" disabled>Start AR Objectron</button>
     </div>
-    <video id="input-video"></video> <canvas id="webgl-canvas"></canvas>
+    <video id="input-video"></video>
+    <canvas id="webgl-canvas"></canvas>
+
     <script type="module">
       console.log(
-        '--- JavaScript module execution started (Objectron Test) ---'
+        '--- JavaScript module execution started (Objectron Corrected) ---'
       );
 
       import * as THREE from 'three';
@@ -107,7 +109,7 @@
       );
 
       // --- Relevant Context ---
-      // Current time: Sunday, March 30, 2025 at 3:35 PM
+      // Current time: Sunday, March 30, 2025 at 3:41 PM
       // Location: Kochi, Kerala, India
 
       // Global variables
@@ -122,9 +124,10 @@
       const infoDivElement = document.getElementById('info');
       const startButtonElement = document.getElementById('start-ar-button');
       const videoElement = document.getElementById('input-video');
-      const canvasElement = document.getElementById('webgl-canvas'); // Three.js output canvas
+      const canvasElement = document.getElementById('webgl-canvas');
 
-      // --- Initialization ---
+      // --- Function Definitions (Defined ONCE Each) ---
+
       async function init() {
         console.log('init() called');
         if (
@@ -135,16 +138,15 @@
           !window.Objectron
         ) {
           console.error(
-            'FATAL: UI/Canvas/Video/Objectron element missing or MP not loaded.'
+            'FATAL: UI/Canvas/Video/Objectron missing or MP not loaded.'
           );
           infoDivElement.textContent =
             'Error: Required elements or MediaPipe Objectron not loaded.';
-          startButtonElement.disabled = true;
-          return;
+          if (startButtonElement) startButtonElement.disabled = true;
+          return; // OK Return
         }
 
         infoDivElement.textContent = 'Setting up Scene & Renderer...';
-        // --- Three.js Setup ---
         try {
           scene = new THREE.Scene();
           camera = new THREE.PerspectiveCamera(
@@ -153,11 +155,12 @@
             0.01,
             40
           );
+          // Re-adding antialias: true as it wasn't the cause of the previous error
           renderer = new THREE.WebGLRenderer({
             canvas: canvasElement,
             antialias: true,
             alpha: true,
-          }); // Keep AA for visual quality if possible
+          });
           renderer.setPixelRatio(window.devicePixelRatio);
           renderer.setSize(window.innerWidth, window.innerHeight);
           renderer.xr.enabled = true;
@@ -167,100 +170,79 @@
           const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
           dirLight.position.set(1, 1, 1);
           scene.add(dirLight);
-
-          // --- Setup Objectron Box Visualizer ---
-          // Create an empty Box3 and a helper to visualize it
           const initialBox = new THREE.Box3(
             new THREE.Vector3(-0.1, -0.1, -0.1),
             new THREE.Vector3(0.1, 0.1, 0.1)
-          ); // Placeholder size
-          objectronBoundingBox = new THREE.Box3Helper(initialBox, 0xffff00); // Yellow box
-          objectronBoundingBox.visible = false; // Initially hidden
+          );
+          objectronBoundingBox = new THREE.Box3Helper(initialBox, 0xffff00); // Yellow
+          objectronBoundingBox.visible = false;
           scene.add(objectronBoundingBox);
           console.log('Objectron bounding box helper created.');
         } catch (error) {
           console.error('Init Error:', error);
-          displayCompatibilityError('3D Setup failed.');
-          return;
+          displayCompatibilityError('3D Setup failed: ' + error.message);
+          return; // OK Return
         }
 
-        // --- MediaPipe Objectron Setup ---
         infoDivElement.textContent = 'Loading Objectron Model...';
         try {
           objectron = new Objectron({
             locateFile: (file) => {
-              // Point to the CDN location of WASM files and models
-              // Note: Models need to be hosted or use CDN links if available
-              // Using generic vision WASM link - check MediaPipe docs for Objectron specifics
-              // Model files (e.g., shoe.tflite) also need to be accessible.
               console.log(`Locating file: ${file}`);
-              // Using newer vision task WASM location - may need adjustment for legacy Objectron
-              return `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm/${file}`;
-              // Older path might be: `https://cdn.jsdelivr.net/npm/@mediapipe/objectron@0.4/${file}`
+              // Assuming WASM files are in this path for the legacy Objectron package
+              return `https://cdn.jsdelivr.net/npm/@mediapipe/objectron@0.4/${file}`;
             },
           });
           console.log('Objectron instance created.');
 
           objectron.setOptions({
             staticImageMode: false,
-            // --- CHOOSE MODEL ---
             modelName: 'Shoe', // Or 'Chair', 'Cup', 'Camera'
-            //--------------------
-            maxNumObjects: 1, // Detect only one object for simplicity
-            minDetectionConfidence: 0.5, // Confidence threshold
-            minTrackingConfidence: 0.7, // Tracking threshold
+            maxNumObjects: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.7,
           });
           console.log('Objectron options set (Model: Shoe).');
 
-          objectron.onResults(onObjectronResults); // Set the callback
+          objectron.onResults(onObjectronResults);
           console.log('Objectron results callback set.');
         } catch (error) {
           console.error('MediaPipe Init Error:', error);
-          displayCompatibilityError('MediaPipe setup failed.');
-          return;
+          displayCompatibilityError('MediaPipe setup failed: ' + error.message);
+          return; // OK Return
         }
 
-        // --- Camera Setup using MediaPipe Utils ---
         infoDivElement.textContent = 'Setting up Camera...';
         try {
-          // Use Camera util to link video element and start feeding frames
           cameraHelper = new Camera(videoElement, {
             onFrame: async () => {
-              // Send the video frame to Objectron for processing
               await objectron.send({ image: videoElement });
             },
-            width: 640, // Lower resolution for performance
+            width: 640,
             height: 480,
           });
-          await cameraHelper.start(); // Start the camera feed and processing loop
+          await cameraHelper.start();
           console.log('MediaPipe Camera util started.');
           infoDivElement.textContent = 'Camera OK. Checking WebXR...';
         } catch (error) {
           console.error('Camera Setup Error:', error);
-          displayCompatibilityError('Camera setup failed.');
-          return;
+          displayCompatibilityError('Camera setup failed: ' + error.message);
+          return; // OK Return
         }
 
-        // --- Check WebXR Support ---
         checkXRSupport();
         window.addEventListener('resize', onWindowResize, false);
       }
 
-      // --- MediaPipe Objectron Results Callback ---
       function onObjectronResults(results) {
-        // This function is called by MediaPipe when it has detection results
         if (results.objectDetections && results.objectDetections.length > 0) {
-          // Store the result of the first detected object
           latestObjectronResult = results.objectDetections[0];
-          // console.log("Objectron detected:", latestObjectronResult); // DEBUG - Can be very spammy
         } else {
-          latestObjectronResult = null; // No object detected
+          latestObjectronResult = null;
         }
       }
 
-      // --- WebXR Support Check ---
       async function checkXRSupport() {
-        // (Checks 'immersive-ar', enables button if supported)
         console.log('checkXRSupport() called.');
         console.log('navigator.xr:', navigator.xr);
         if ('xr' in navigator && navigator.xr) {
@@ -297,8 +279,8 @@
 
       function displayCompatibilityError(message) {
         console.error('Compatibility Error:', message);
-        startButtonElement.disabled = true;
-        infoDivElement.textContent = message;
+        if (startButtonElement) startButtonElement.disabled = true;
+        if (infoDivElement) infoDivElement.textContent = message;
       }
 
       function handleStartButtonClick() {
@@ -307,7 +289,6 @@
         }
       }
 
-      // --- WebXR Session Management ---
       async function startARSession() {
         infoDivElement.textContent = 'Starting AR session...';
         startButtonElement.disabled = true;
@@ -321,10 +302,7 @@
           currentSession = null;
         }
         try {
-          // Request session *without* hit-test initially, as Objectron provides the box
-          currentSession = await navigator.xr.requestSession(
-            'immersive-ar' /*, { requiredFeatures: ['hit-test'] }*/
-          );
+          currentSession = await navigator.xr.requestSession('immersive-ar');
           console.log('requestSession succeeded.');
           onSessionStarted(currentSession);
         } catch (error) {
@@ -338,9 +316,8 @@
       async function onSessionStarted(session) {
         console.log('onSessionStarted called.');
         session.addEventListener('end', onSessionEnded);
-        // No 'select' listener needed for automatic detection
+        // No select listener needed now
 
-        // Configure and link renderer
         try {
           console.log("Setting hint 'local'...");
           renderer.xr.setReferenceSpaceType('local');
@@ -355,22 +332,20 @@
             await session.end();
           } catch (e) {}
           return;
-        }
+        } // OK Return
 
-        // Get reference space established by Three.js
         referenceSpace = renderer.xr.getReferenceSpace();
         if (!referenceSpace) {
-          console.error('Failed get ref space from Manager.');
+          console.error('Failed get ref space.');
           infoDivElement.textContent = 'Fatal: No coordinate system.';
           try {
             await session.end();
           } catch (e) {}
           return;
-        }
+        } // OK Return
         console.log(`Using reference space from Three.js (requested 'local').`);
         infoDivElement.textContent = 'AR Session Running. Point at a Shoe.';
 
-        // Start Render Loop
         renderer.setAnimationLoop(onXRFrame);
         console.log('Three.js Render Loop started.');
       }
@@ -386,60 +361,51 @@
         } catch (error) {
           console.error('Error stopping loop:', error);
         }
-        // Stop camera helper? MediaPipe Camera util might need explicit stop
-        // cameraHelper?.stop(); // Requires cameraHelper to be accessible or managed differently
-        // console.log("Camera helper stopped.");
-
-        // Hide the bounding box
         if (objectronBoundingBox) objectronBoundingBox.visible = false;
-
         infoDivElement.textContent = 'AR Session ended. Click Start again.';
         startButtonElement.style.display = 'inline-block';
         startButtonElement.disabled = false;
         console.log('AR Session Ended.');
+        // Consider stopping camera helper cleanly if possible
       }
 
       function onWindowResize() {
         if (!renderer.xr.isPresenting) {
-          /* ... resize logic ... */
+          camera.aspect = window.innerWidth / window.innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(window.innerWidth, window.innerHeight);
         }
-      } // Unchanged basic resize
+      }
 
-      // --- onXRFrame - Render Loop ---
-      // --- onXRFrame - Render Loop (with added detection logs) ---
+      // --- onXRFrame Function (with detection logs) ---
       function onXRFrame(timestamp, frame) {
+        // console.log(`onXRFrame called - Timestamp: ${timestamp}`); // Reduce spam
+
         if (!frame || !currentSession) {
+          console.warn('onXRFrame: No frame or session.');
           return;
-        }
+        } // OK Return
 
         try {
-          // Get viewer pose
           const pose = frame.getViewerPose(referenceSpace);
           if (!pose) {
-            // console.warn("No viewer pose available this frame."); // Can be spammy
-            // Still attempt to render, but skip object placement logic
             renderer.render(scene, camera);
             return;
-          }
-          const viewMatrix = pose.transform.inverse.matrix; // Needed for transforms? Check Objectron output space
+          } // OK Return if no pose
           const cameraWorldMatrix = new THREE.Matrix4().fromArray(
             pose.transform.matrix
           );
 
-          // Check for latest Objectron result
           if (latestObjectronResult) {
-            // --- OBJECT DETECTED ---
-            console.log('DEBUG: Objectron Result DETECTED this frame.'); // Added Log
+            // console.log("DEBUG: Objectron Result DETECTED this frame."); // Reduce spam
+            const objectron_R = latestObjectronResult.rotation;
+            const objectron_T = latestObjectronResult.translation;
+            const objectron_S = latestObjectronResult.scale;
 
-            // --- Coordinate Transformation ---
-            const objectron_R = latestObjectronResult.rotation; // 3x3 or 4x4 Rotation matrix? (Assume 3x3 Col Major needs composing)
-            const objectron_T = latestObjectronResult.translation; // Translation vector [x, y, z]
-            const objectron_S = latestObjectronResult.scale; // Scale vector [sx, sy, sz]
-
+            // --- Transform (Needs Verification based on MP output format) ---
             const objectMatrixCamera = new THREE.Matrix4();
-            // Example: Constructing 4x4 from 3x3 Rot + Trans (COLUMN MAJOR from MediaPipe to ROW MAJOR for Three)
-            // This part is highly dependent on exact format from MP and needs verification/debugging
             objectMatrixCamera.set(
+              // Assuming Column-Major 3x3 Rotation from MP -> Row-Major 4x4 for THREE
               objectron_R[0],
               objectron_R[3],
               objectron_R[6],
@@ -457,26 +423,21 @@
               0,
               1
             );
-            // Alternative if MP gives Row Major 4x4 already: objectMatrixCamera.fromArray(latestObjectronResult.poseMatrix);
-
-            const objectWorldMatrix = new THREE.Matrix4();
-            objectWorldMatrix.multiplyMatrices(
+            const objectWorldMatrix = new THREE.Matrix4().multiplyMatrices(
               cameraWorldMatrix,
               objectMatrixCamera
             );
 
             // --- Update Visualizer ---
-            // Update Box3Helper based on matrix (more direct than transforming a Box3)
-            objectronBoundingBox.matrix.copy(objectWorldMatrix); // Apply world matrix directly
-            // Apply scale - Box3Helper is unit size 1x1x1 centered at origin by default
+            objectronBoundingBox.matrix.copy(objectWorldMatrix);
+            // Apply scale - Box3Helper is 1x1x1 centered. MP scale is full W/H/D? Assume yes for now.
             objectronBoundingBox.scale.set(
               objectron_S[0],
               objectron_S[1],
               objectron_S[2]
             );
-            objectronBoundingBox.matrixAutoUpdate = false; // We are setting matrix directly
-            objectronBoundingBox.updateMatrixWorld(true); // Force update if needed
-
+            objectronBoundingBox.matrixAutoUpdate = false;
+            objectronBoundingBox.updateMatrixWorld(true);
             objectronBoundingBox.visible = true;
 
             // --- Display Scale ---
@@ -487,149 +448,38 @@
               infoDivElement.textContent = scaleText;
             }
           } else {
-            // --- NO OBJECT DETECTED ---
-            console.log('DEBUG: No Objectron result this frame.'); // Added Log
-
+            // console.log("DEBUG: No Objectron result this frame."); // Reduce spam
             objectronBoundingBox.visible = false;
             if (!infoDivElement.textContent.startsWith('AR Session Running')) {
               infoDivElement.textContent =
-                'AR Session Running. Point at a Shoe.'; // Reset text
+                'AR Session Running. Point at a Shoe.';
             }
           }
-
-          // Render the main Three.js scene
           renderer.render(scene, camera);
         } catch (error) {
-          console.error('Error in onXRFrame:', error);
-        }
-      }
-
-      // --- Full Code ---
-      // Replace the existing onXRFrame function in the previous full code block
-      // with this updated version.
-      if (!frame || !currentSession) {
-        return;
-      }
-
-      try {
-        // Get viewer pose (needed for coordinate transforms)
-        const pose = frame.getViewerPose(referenceSpace);
-        if (!pose) {
-          console.warn('No viewer pose available this frame.');
-          return; // Cannot place object without knowing where camera is
-        }
-        // View matrix is inverse of camera world matrix
-        const viewMatrix = pose.transform.inverse.matrix;
-        // Camera world position can be extracted if needed
-        // const cameraWorldPosition = new THREE.Vector3().setFromMatrixPosition(pose.transform.matrix);
-
-        // Check for latest Objectron result
-        if (latestObjectronResult) {
-          // --- Coordinate Transformation ---
-          // Objectron provides pose relative to camera. We need world pose.
-          // Get Objectron's pose matrix (Rotation + Translation)
-          // Note: MediaPipe uses column-major matrices, Three.js uses row-major (usually).
-          // Need to be careful with matrix multiplication order and potential transposition.
-          // Assuming Objectron provides R and T separately:
-          const objectron_R = latestObjectronResult.rotation; // 3x3 or 4x4 Rotation matrix (Column-major?)
-          const objectron_T = latestObjectronResult.translation; // Translation vector [x, y, z]
-          const objectron_S = latestObjectronResult.scale; // Scale vector [sx, sy, sz]
-
-          // Construct object's pose matrix relative to the camera
-          const objectMatrixCamera = new THREE.Matrix4();
-          // Assuming objectron_R is 3x3 column-major. Need to convert to 4x4 row-major for Three.js
-          // This conversion/multiplication is complex and error-prone!
-          // Placeholder - this needs careful implementation based on exact MP output format:
-          objectMatrixCamera.set(
-            // Example assuming COLUMN-MAJOR R input needing transpose + T
-            objectron_R[0],
-            objectron_R[3],
-            objectron_R[6],
-            objectron_T[0],
-            objectron_R[1],
-            objectron_R[4],
-            objectron_R[7],
-            objectron_T[1],
-            objectron_R[2],
-            objectron_R[5],
-            objectron_R[8],
-            objectron_T[2],
-            0,
-            0,
-            0,
-            1
+          console.error(
+            '!!!!!!!!!!!!!!!! ERROR INSIDE onXRFrame !!!!!!!!!!!!!!!!'
           );
-          // If R is already 4x4 row-major, just use .fromArray(objectron_R) and .setPosition(objectron_T)
-
-          // Get camera's world matrix (inverse of view matrix)
-          const cameraWorldMatrix = new THREE.Matrix4().fromArray(
-            pose.transform.matrix
-          );
-
-          // Calculate object's world matrix: World = CameraWorld * ObjectLocalCamera
-          const objectWorldMatrix = new THREE.Matrix4();
-          objectWorldMatrix.multiplyMatrices(
-            cameraWorldMatrix,
-            objectMatrixCamera
-          );
-
-          // --- Update Visualizer ---
-          // Update the Box3Helper based on the calculated world pose and scale
-          // Box3Helper needs a Box3. Create one representing the scaled unit cube at origin.
-          const unitBox = new THREE.Box3(
-            new THREE.Vector3(-0.5, -0.5, -0.5),
-            new THREE.Vector3(0.5, 0.5, 0.5)
-          );
-          // Apply scale first
-          unitBox.min.multiplyScalar(2); // Match helper size if needed? Check Box3Helper source maybe. Or just apply scale to helper?
-          unitBox.max.multiplyScalar(2);
-          // unitBox.min.multiply(new THREE.Vector3(objectron_S[0], objectron_S[1], objectron_S[2]));
-          // unitBox.max.multiply(new THREE.Vector3(objectron_S[0], objectron_S[1], objectron_S[2]));
-
-          // Apply world transformation to the unit box
-          unitBox.applyMatrix4(objectWorldMatrix); // This transforms the box corners
-
-          // Update the Box3Helper to match the transformed box
-          objectronBoundingBox.box.copy(unitBox); // Update the helper's internal box
-          // Apply Scale directly to helper might be simpler? Needs testing.
-          // objectronBoundingBox.position.setFromMatrixPosition(objectWorldMatrix);
-          // objectronBoundingBox.quaternion.setFromRotationMatrix(objectWorldMatrix);
-          // objectronBoundingBox.scale.set(objectron_S[0]*2, objectron_S[1]*2, objectron_S[2]*2); // Multiply by 2 because Box3Helper draws a box of size 2?
-
-          objectronBoundingBox.visible = true;
-
-          // --- Display Scale ---
-          // IMPORTANT: Verify what these scale values represent! Meters? Relative?
-          const scaleText = `Est. Scale: X:${objectron_S[0].toFixed(
-            3
-          )}, Y:${objectron_S[1].toFixed(3)}, Z:${objectron_S[2].toFixed(3)}`;
-          if (infoDivElement.textContent !== scaleText) {
-            // Avoid constant updates
-            infoDivElement.textContent = scaleText;
-            // console.log(scaleText); // Optional console log
+          console.error(error);
+          console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+          if (currentSession) {
+            console.log('Ending session due to frame error...');
+            currentSession
+              .end()
+              .catch((endErr) =>
+                console.error('Error ending session post-error:', endErr)
+              );
           }
-        } else {
-          // No object detected this frame
-          objectronBoundingBox.visible = false;
-          if (!infoDivElement.textContent.startsWith('AR Session Running')) {
-            // Avoid flicker
-            infoDivElement.textContent = 'AR Session Running. Point at a Shoe.';
-          }
+          return; // OK Return
         }
-
-        // Render the main Three.js scene
-        renderer.render(scene, camera);
-      } catch (error) {
-        console.error('Error in onXRFrame:', error);
-        // Consider stopping the loop or session on error
-      }
+      } // End of onXRFrame
 
       // --- Start the application ---
       document.addEventListener('DOMContentLoaded', () => {
         console.log('DOM Ready.');
         init();
       });
-      console.log('--- JS module execution finished (Objectron Test) ---');
+      console.log('--- JS module execution finished (Objectron Corrected) ---');
     </script>
     <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
     <script>
