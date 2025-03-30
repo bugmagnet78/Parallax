@@ -6,9 +6,9 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, user-scalable=no"
     />
-    <title>WebXR Measurement - User Guided Taps</title>
+    <title>WebXR Measurement - Visualize & Calculate</title>
     <style>
-      /* CSS styles */
+      /* CSS styles (unchanged) */
       body {
         margin: 0;
         overflow: hidden;
@@ -28,9 +28,9 @@
         padding: 10px;
         font-size: 16px;
         box-sizing: border-box;
-      }
+        min-height: 4em;
+      } /* Added min-height */
       .button-container {
-        /* Container for buttons at bottom */
         position: absolute;
         bottom: 30px;
         width: 100%;
@@ -38,10 +38,9 @@
         z-index: 101;
         display: flex;
         justify-content: center;
-        gap: 20px; /* Arrange buttons side-by-side */
+        gap: 20px;
       }
       .button-container button {
-        /* Style for buttons */
         padding: 14px 28px;
         font-size: 18px;
         background-color: #007bff;
@@ -63,11 +62,10 @@
       }
       #reset-button {
         background-color: #dc3545;
-      } /* Red for Reset */
+      }
       #reset-button:hover:not(:disabled) {
         background-color: #c82333;
       }
-
       canvas {
         display: block;
         position: absolute;
@@ -98,7 +96,7 @@
 
     <script type="module">
       console.log(
-        '--- JavaScript module execution started (User Guided Taps) ---'
+        '--- JavaScript module execution started (Visualize & Calculate) ---'
       );
 
       import * as THREE from 'three';
@@ -109,7 +107,7 @@
       );
 
       // --- Relevant Context ---
-      // Current time: Saturday, March 29, 2025 at 9:00 PM
+      // Current time: Sunday, March 30, 2025 at 1:04 AM
       // Location: Kochi, Kerala, India
 
       // Global variables
@@ -120,17 +118,16 @@
       let referenceSpace = null;
       let latestHitPoseMatrix = null;
       let selectEventPending = false;
-      let placedMarkers = []; // Holds THREE.Mesh objects
+      let placedMarkers = []; // Holds THREE.Mesh marker objects
+
+      // --- NEW: Variables for drawing lines ---
+      let lineGeometry = null;
+      let lineMaterial = null;
+      let measurementLines = null; // THREE.LineSegments object
 
       // --- State Management for Measurement ---
       let measurementState = 'idle'; // 'idle', 'waiting_bl', 'waiting_br', 'waiting_tl', 'done'
-      let cornerPoints = {
-        // Stores THREE.Vector3 positions
-        bl: null, // bottom-left
-        br: null, // bottom-right
-        tl: null, // top-left
-        // Add 'back' or other points later if needed
-      };
+      let cornerPoints = { bl: null, br: null, tl: null }; // Stores THREE.Vector3
 
       // Get UI elements
       const infoDivElement = document.getElementById('info');
@@ -142,6 +139,7 @@
 
       function init() {
         console.log('init() called');
+        // ... (UI element checks) ...
         if (
           !infoDivElement ||
           !startButtonElement ||
@@ -164,7 +162,7 @@
           renderer = new THREE.WebGLRenderer({
             canvas: canvasElement,
             alpha: true,
-          }); // No antialias based on previous test
+          }); // No AA
           renderer.setPixelRatio(window.devicePixelRatio);
           renderer.setSize(window.innerWidth, window.innerHeight);
           renderer.xr.enabled = true;
@@ -176,6 +174,17 @@
           const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
           dirLight.position.set(1, 1, 1);
           scene.add(dirLight);
+
+          // --- NEW: Setup Line Object ---
+          lineGeometry = new THREE.BufferGeometry();
+          lineMaterial = new THREE.LineBasicMaterial({
+            color: 0x00ffff,
+            linewidth: 2,
+          }); // Cyan lines
+          measurementLines = new THREE.LineSegments(lineGeometry, lineMaterial);
+          measurementLines.visible = false; // Initially hidden
+          scene.add(measurementLines);
+          console.log('Measurement line object created.');
         } catch (error) {
           console.error('Error during Three.js setup:', error);
           infoDivElement.textContent = '3D Setup Error: ' + error.message;
@@ -183,17 +192,15 @@
           return;
         }
 
-        // Add event listener for reset button
         resetButtonElement.addEventListener('click', resetMeasurement);
-
         infoDivElement.textContent = 'Checking WebXR support...';
-        checkXRSupport();
+        checkXRSupport(); // This now enables start button via handleStartButtonClick listener setup
         window.addEventListener('resize', onWindowResize, false);
-        updateInstructions(); // Set initial instruction
+        updateInstructions();
       }
 
       async function checkXRSupport() {
-        // (Unchanged - checks 'immersive-ar' & 'hit-test')
+        // (Unchanged - checks 'immersive-ar' & 'hit-test', enables button)
         console.log('checkXRSupport() called.');
         infoDivElement.textContent = 'Checking WebXR capabilities...';
         console.log('navigator.xr:', navigator.xr);
@@ -222,7 +229,7 @@
                   handleStartButtonClick
                 );
                 console.log('AR Button enabled.');
-              } // Changed listener
+              } // Use correct handler
               else {
                 infoDivElement.textContent =
                   'AR supported, but Hit Test required.';
@@ -245,7 +252,7 @@
           console.error('navigator.xr object not found.');
           displayCompatibilityError('WebXR API not available.');
         }
-        updateInstructions(); // Update UI based on checks
+        updateInstructions();
       }
 
       function displayCompatibilityError(message) {
@@ -255,18 +262,15 @@
         updateInstructions();
       }
 
-      // --- Button Click Handler ---
       function handleStartButtonClick() {
+        // Starts the AR session if not already started
         if (!currentSession) {
-          // If session not active, start it
           startARSession();
         }
-        // If session *is* active, this button might act as a reset or trigger next step?
-        // For now, starting session also implies starting measurement sequence.
-        // Let Reset button handle explicit resets.
       }
 
       async function startARSession() {
+        // (Unchanged - requests session)
         infoDivElement.textContent = 'Starting AR session...';
         startButtonElement.disabled = true;
         startButtonElement.style.display = 'none';
@@ -277,7 +281,7 @@
             await currentSession.end();
           } catch (e) {}
           currentSession = null;
-        } // Ensure clean start
+        }
         try {
           currentSession = await navigator.xr.requestSession('immersive-ar', {
             requiredFeatures: ['hit-test'],
@@ -291,38 +295,33 @@
           startButtonElement.disabled = false;
           measurementState = 'idle';
           updateInstructions();
-        } // Reset state on failure
+        }
       }
 
       async function onSessionStarted(session) {
+        // (Unchanged - Sets up session, reference space, hit test)
         console.log('onSessionStarted called.');
         session.addEventListener('end', onSessionEnded);
         session.addEventListener('select', onSelect);
         console.log("'select' event listener added.");
-
-        // Configure and link renderer
         try {
-          console.log(
-            "Setting Three.js reference space type hint to 'local'..."
-          );
+          console.log("Setting hint 'local'...");
           renderer.xr.setReferenceSpaceType('local');
           console.log('Hint set.');
-          console.log('Attempting: await renderer.xr.setSession(session)...');
+          console.log('Attempting setSession...');
           await renderer.xr.setSession(session);
           console.log('Successfully set renderer XR session.');
         } catch (err) {
-          /* ... error handling ... */ console.error('Error setSession:', err);
+          console.error('Error setSession:', err);
           infoDivElement.textContent = 'Fatal: Link renderer error.';
           try {
             await session.end();
           } catch (e) {}
           return;
         }
-
-        // Get reference space
         referenceSpace = renderer.xr.getReferenceSpace();
         if (!referenceSpace) {
-          /* ... error handling ... */ console.error('Failed get ref space.');
+          console.error('Failed get ref space.');
           infoDivElement.textContent = 'Fatal: No coordinate system.';
           try {
             await session.end();
@@ -330,21 +329,18 @@
           return;
         }
         console.log(`Using reference space from Three.js (requested 'local').`);
-
-        // Setup hit testing
         hitTestSource = null;
         hitTestSourceRequested = false;
         try {
-          /* ... same logic to get hit test source ... */
-          console.log("Attempting 'viewer' space for hit test");
+          console.log("Attempt 'viewer' space...");
           const viewerSpace = await session.requestReferenceSpace('viewer');
           console.log("Got 'viewer' space.");
-          console.log('Attempting hit test source...');
+          console.log('Attempt hit source...');
           hitTestSource = await session.requestHitTestSource({
             space: viewerSpace,
           });
           hitTestSourceRequested = true;
-          console.log('Hit test source obtained.');
+          console.log('Hit source obtained.');
         } catch (err) {
           console.error(`Hit test setup error: ${err.message}`);
           infoDivElement.textContent = `Warning: Hit-Test setup failed: ${err.message}`;
@@ -355,10 +351,9 @@
         resetMeasurement(false); // Reset state without ending session
         measurementState = 'waiting_bl'; // Start waiting for bottom-left
         updateInstructions();
-        resetButtonElement.style.display = 'inline-block'; // Show Reset button
-        startButtonElement.style.display = 'none'; // Hide Start button
+        resetButtonElement.style.display = 'inline-block';
+        startButtonElement.style.display = 'none';
 
-        // Start Render Loop
         if (referenceSpace) {
           renderer.setAnimationLoop(onXRFrame);
           console.log('Three.js Render Loop started.');
@@ -368,21 +363,20 @@
       }
 
       function onSessionEnded(/*event*/) {
+        // (Unchanged - stops loop, resets state)
         console.log('onSessionEnded called.');
         currentSession?.removeEventListener('select', onSelect);
         currentSession = null;
         hitTestSourceRequested = false;
         hitTestSource = null;
         referenceSpace = null;
-        // Stop loop FIRST
         try {
           renderer.setAnimationLoop(null);
           console.log('Three.js Render Loop stopped.');
         } catch (error) {
           console.error('Error stopping loop:', error);
         }
-        // Then reset state
-        resetMeasurement(true); // Full reset including button states
+        resetMeasurement(true); // Full reset
         console.log('AR Session Ended.');
       }
 
@@ -390,73 +384,136 @@
         /* ... unchanged ... */
       }
       function onSelect(event) {
-        console.log('Select event detected.');
-        selectEventPending = true;
+        /* ... unchanged ... */
       }
 
       // --- Reset Measurement State ---
       function resetMeasurement(isSessionEnding = false) {
         console.log('Resetting measurement...');
-        // Clear stored points
         cornerPoints.bl = null;
         cornerPoints.br = null;
         cornerPoints.tl = null;
-        // Remove visual markers
         placedMarkers.forEach((marker) => {
           scene.remove(marker);
         });
         placedMarkers = [];
 
-        // Reset state and UI
+        // --- NEW: Hide lines ---
+        measurementLines.visible = false;
+
         if (isSessionEnding) {
           measurementState = 'idle';
-          startButtonElement.disabled = !navigator.xr; // Re-enable if XR supported
+          startButtonElement.disabled = !navigator.xr;
           startButtonElement.style.display = 'inline-block';
           resetButtonElement.style.display = 'none';
         } else if (currentSession) {
-          // If resetting during active session, go back to first step
           measurementState = 'waiting_bl';
-          resetButtonElement.style.display = 'inline-block'; // Ensure reset stays visible
-          startButtonElement.style.display = 'none'; // Keep start hidden
+          resetButtonElement.style.display = 'inline-block';
+          startButtonElement.style.display = 'none';
         }
         updateInstructions();
       }
 
       // --- Update Instructions UI ---
       function updateInstructions() {
+        let text = '';
         switch (measurementState) {
           case 'idle':
-            infoDivElement.textContent = 'Click "Start Measurement" to begin.';
+            text = startButtonElement.disabled
+              ? 'WebXR not supported or Hit Test unavailable.'
+              : 'Click "Start Measurement" to begin.';
             break;
           case 'waiting_bl':
-            infoDivElement.textContent =
-              'Aim and Tap the FRONT BOTTOM-LEFT corner.';
+            text = 'Aim and Tap the FRONT BOTTOM-LEFT corner.';
             break;
           case 'waiting_br':
-            infoDivElement.textContent = 'Tap the FRONT BOTTOM-RIGHT corner.';
+            text = 'Tap the FRONT BOTTOM-RIGHT corner.';
             break;
           case 'waiting_tl':
-            infoDivElement.textContent = 'Tap the FRONT TOP-LEFT corner.';
+            text = 'Tap the FRONT TOP-LEFT corner.';
             break;
-          // Add case for 'waiting_back' later
           case 'done':
-            // TODO: Display calculated dimensions
-            infoDivElement.textContent =
-              'Measurement points collected. Click Reset.';
+            // --- NEW: Calculate and display results ---
+            const dimensions = calculateDimensions(cornerPoints);
+            if (dimensions) {
+              text = `Measurement: W: ${dimensions.width.toFixed(
+                3
+              )}m, H: ${dimensions.height.toFixed(3)}m. Click Reset.`;
+              // Add Depth later if calculated
+            } else {
+              text = 'Points collected, but calculation failed. Click Reset.';
+            }
             break;
           case 'error':
-            // Keep error message set previously
-            break;
+            text = infoDivElement.textContent;
+            break; // Keep error message
           default:
-            infoDivElement.textContent = 'Initializing...';
+            text = 'Initializing...';
         }
-        // Update button text/state if needed
+        infoDivElement.textContent = text;
+
+        // Update button visibility based on state
         if (currentSession) {
           startButtonElement.style.display = 'none';
           resetButtonElement.style.display = 'inline-block';
         } else {
           startButtonElement.textContent = 'Start Measurement';
+          startButtonElement.style.display = 'inline-block';
           resetButtonElement.style.display = 'none';
+        }
+      }
+
+      // --- NEW: Calculate Dimensions ---
+      function calculateDimensions(points) {
+        if (points.bl && points.br && points.tl) {
+          try {
+            const width = points.bl.distanceTo(points.br);
+            const height = points.bl.distanceTo(points.tl);
+            // Basic calculation assumes tapped points form the primary width/height vectors
+            // More complex calculation needed if points are not perfectly aligned
+            // Depth calculation requires a 4th point
+            console.log(`Calculated Dimensions - W: ${width}, H: ${height}`);
+            return { width, height };
+          } catch (error) {
+            console.error('Error calculating dimensions:', error);
+            return null;
+          }
+        }
+        return null; // Not enough points
+      }
+
+      // --- NEW: Update Measured Lines ---
+      function updateMeasuredLines(points) {
+        const vertices = [];
+        let linesVisible = false;
+
+        // Draw line BL -> BR (Width)
+        if (points.bl && points.br) {
+          vertices.push(points.bl.x, points.bl.y, points.bl.z);
+          vertices.push(points.br.x, points.br.y, points.br.z);
+          linesVisible = true;
+        }
+        // Draw line BL -> TL (Height)
+        if (points.bl && points.tl) {
+          vertices.push(points.bl.x, points.bl.y, points.bl.z);
+          vertices.push(points.tl.x, points.tl.y, points.tl.z);
+          linesVisible = true;
+        }
+        // TODO: Add lines for the other two sides of the front face later
+        // Requires calculating the 4th corner (TR) = BR + (TL - BL)
+
+        if (linesVisible) {
+          lineGeometry.setAttribute(
+            'position',
+            new THREE.Float32BufferAttribute(vertices, 3)
+          );
+          lineGeometry.computeBoundingSphere(); // Needed for proper rendering
+          measurementLines.visible = true;
+          console.log(
+            `Updated measurement lines with ${vertices.length / 3} vertices.`
+          );
+        } else {
+          measurementLines.visible = false;
         }
       }
 
@@ -465,9 +522,9 @@
         if (!frame) {
           return;
         }
-        latestHitPoseMatrix = null; // Reset hit pose for this frame
+        latestHitPoseMatrix = null;
 
-        // --- Get Hit Test Results ---
+        // Get Hit Test Results
         if (hitTestSourceRequested && hitTestSource && referenceSpace) {
           try {
             const hitTestResults = frame.getHitTestResults(hitTestSource);
@@ -483,15 +540,14 @@
           }
         }
 
-        // --- Process Pending Select Event Based on State ---
+        // Process Pending Select Event Based on State
         if (selectEventPending) {
           console.log(`Processing select in state: ${measurementState}`);
           if (latestHitPoseMatrix) {
-            // Place a marker visually
-            const markerPosition = placeMarker(latestHitPoseMatrix); // placeMarker now returns position
-
-            // Store point based on current state
+            const markerPosition = placeMarker(latestHitPoseMatrix);
             let pointStored = false;
+            let justCompleted = false; // Flag if measurement finished this tap
+
             switch (measurementState) {
               case 'waiting_bl':
                 cornerPoints.bl = markerPosition;
@@ -505,11 +561,10 @@
                 break;
               case 'waiting_tl':
                 cornerPoints.tl = markerPosition;
-                measurementState = 'done'; // For now, stop after 3 points
-                // TODO: Later change to 'waiting_back' or similar
+                measurementState = 'done'; // Finished collecting points for W/H
                 pointStored = true;
+                justCompleted = true; // Signal completion
                 break;
-              // Add case for 'waiting_back' later
             }
 
             if (pointStored) {
@@ -519,25 +574,35 @@
                   (key) => cornerPoints[key] === markerPosition
                 )
               );
-              updateInstructions(); // Update instructions for next step
-              // TODO: Add distance calculation and box drawing when 'done'
+              updateMeasuredLines(cornerPoints); // Update lines immediately
+              // Update instructions AFTER lines/calculations
+              if (justCompleted) {
+                // Calculations happen via updateInstructions when state is 'done'
+                console.log('Measurement points complete.');
+              }
+              updateInstructions();
             } else {
-              console.log(
-                'Tap occurred in unexpected state:',
-                measurementState
-              );
+              console.log('Tap in unexpected state:', measurementState);
             }
           } else {
-            // No hit detected on tap
-            infoDivElement.textContent += ' (No surface hit!)'; // Append feedback
+            const currentInstructions = infoDivElement.textContent;
+            infoDivElement.textContent =
+              currentInstructions + ' (No surface hit!)';
             console.log('No hit pose on tap.');
-            // Briefly show feedback then revert?
-            setTimeout(() => updateInstructions(), 1000);
+            setTimeout(() => {
+              // Revert message after delay only if state hasn't changed
+              if (
+                infoDivElement.textContent ===
+                currentInstructions + ' (No surface hit!)'
+              ) {
+                updateInstructions();
+              }
+            }, 1500); // Increased delay
           }
-          selectEventPending = false; // Reset flag
+          selectEventPending = false;
         }
 
-        // --- Render ---
+        // Render
         try {
           renderer.render(scene, camera);
         } catch (error) {
@@ -545,22 +610,21 @@
         }
       }
 
-      // --- Place Marker Helper (Now returns position) ---
+      // Place Marker Helper (Unchanged - returns position)
       function placeMarker(matrixArray) {
         const geometry = new THREE.SphereGeometry(0.02, 16, 16);
-        // Use different colors per state? Optional.
         const material = new THREE.MeshStandardMaterial({
           color: 0x00ff00,
           roughness: 0.4,
           metalness: 0.1,
-        }); // Green markers
+        }); // Green
         const marker = new THREE.Mesh(geometry, material);
         marker.matrix.fromArray(matrixArray);
         marker.matrix.decompose(
           marker.position,
           marker.quaternion,
           marker.scale
-        ); // Get position vector
+        );
         marker.scale.set(1, 1, 1);
         scene.add(marker);
         placedMarkers.push(marker);
@@ -570,7 +634,7 @@
           marker.position.y.toFixed(3),
           marker.position.z.toFixed(3)
         );
-        return marker.position.clone(); // Return a copy of the position vector
+        return marker.position.clone();
       }
 
       // --- Start the application ---
@@ -578,7 +642,9 @@
         console.log('DOM Ready.');
         init();
       });
-      console.log('--- JS module execution finished (User Guided Taps) ---');
+      console.log(
+        '--- JS module execution finished (Visualize & Calculate) ---'
+      );
     </script>
     <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
     <script>
