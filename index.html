@@ -518,13 +518,14 @@
       }
 
       // --- onXRFrame - Render Loop ---
+      // --- REVISED onXRFrame - More Logging ---
       function onXRFrame(timestamp, frame) {
         if (!frame) {
           return;
         }
-        latestHitPoseMatrix = null;
+        latestHitPoseMatrix = null; // Reset hit pose for this frame
 
-        // Get Hit Test Results
+        // Get Hit Test Results (Unchanged)
         if (hitTestSourceRequested && hitTestSource && referenceSpace) {
           try {
             const hitTestResults = frame.getHitTestResults(hitTestSource);
@@ -542,72 +543,207 @@
 
         // Process Pending Select Event Based on State
         if (selectEventPending) {
-          console.log(`Processing select in state: ${measurementState}`);
+          console.log(`DEBUG: Processing select in state: ${measurementState}`); // Log entry and state
+
           if (latestHitPoseMatrix) {
+            console.log('DEBUG: Hit detected! Matrix available.'); // Log hit success
+
+            // Place a marker visually FIRST
+            console.log('DEBUG: Calling placeMarker...');
             const markerPosition = placeMarker(latestHitPoseMatrix);
+            console.log(
+              'DEBUG: placeMarker returned position:',
+              markerPosition
+            );
+
+            if (!markerPosition) {
+              console.error(
+                'DEBUG: placeMarker did not return a valid position!'
+              );
+              selectEventPending = false; // Reset flag even on error
+              return; // Stop processing this tap
+            }
+
+            // Store point based on current state
             let pointStored = false;
             let justCompleted = false; // Flag if measurement finished this tap
 
+            console.log('DEBUG: Entering state switch for:', measurementState);
             switch (measurementState) {
               case 'waiting_bl':
+                console.log('DEBUG: State matched: waiting_bl');
                 cornerPoints.bl = markerPosition;
                 measurementState = 'waiting_br';
                 pointStored = true;
                 break;
               case 'waiting_br':
+                console.log('DEBUG: State matched: waiting_br');
                 cornerPoints.br = markerPosition;
                 measurementState = 'waiting_tl';
                 pointStored = true;
                 break;
               case 'waiting_tl':
+                console.log('DEBUG: State matched: waiting_tl');
                 cornerPoints.tl = markerPosition;
                 measurementState = 'done'; // Finished collecting points for W/H
                 pointStored = true;
-                justCompleted = true; // Signal completion
+                justCompleted = true;
+                break;
+              // Add case for 'waiting_back' later
+              default:
+                console.warn(
+                  'DEBUG: Tap occurred in unexpected/unhandled state:',
+                  measurementState
+                );
+                // Don't store point if state is unexpected (like 'idle' or 'done')
                 break;
             }
 
             if (pointStored) {
               console.log(
-                'Stored point for state:',
-                Object.keys(cornerPoints).find(
-                  (key) => cornerPoints[key] === markerPosition
-                )
+                'DEBUG: Stored point successfully. New state:',
+                measurementState
               );
+              console.log('DEBUG: Calling updateMeasuredLines...');
               updateMeasuredLines(cornerPoints); // Update lines immediately
-              // Update instructions AFTER lines/calculations
+              console.log('DEBUG: Calling updateInstructions...');
+              updateInstructions(); // Update instructions for next step / display results
               if (justCompleted) {
-                // Calculations happen via updateInstructions when state is 'done'
-                console.log('Measurement points complete.');
+                console.log('DEBUG: Measurement points complete.');
               }
-              updateInstructions();
             } else {
-              console.log('Tap in unexpected state:', measurementState);
+              console.log(
+                "DEBUG: Point not stored (state was likely 'idle' or 'done')."
+              );
+              // Maybe provide feedback if user taps when 'done'?
+              if (measurementState === 'done') {
+                infoDivElement.textContent =
+                  'Measurement complete. Click Reset to start again.';
+              }
             }
           } else {
+            // No hit detected on tap
+            console.log('DEBUG: No hit pose found for this tap.'); // Log hit failure
             const currentInstructions = infoDivElement.textContent;
-            infoDivElement.textContent =
-              currentInstructions + ' (No surface hit!)';
-            console.log('No hit pose on tap.');
+            // Avoid appending multiple times if user taps rapidly
+            if (!currentInstructions.endsWith('(No surface hit!)')) {
+              infoDivElement.textContent =
+                currentInstructions + ' (No surface hit!)';
+            }
             setTimeout(() => {
               // Revert message after delay only if state hasn't changed
-              if (
-                infoDivElement.textContent ===
-                currentInstructions + ' (No surface hit!)'
-              ) {
-                updateInstructions();
+              // Check if the message is still the one we added
+              const expectedMessage =
+                currentInstructions + ' (No surface hit!)';
+              if (infoDivElement.textContent === expectedMessage) {
+                console.log("DEBUG: Reverting 'No surface hit' message.");
+                updateInstructions(); // Revert to standard instruction
               }
-            }, 1500); // Increased delay
+            }, 1500);
           }
-          selectEventPending = false;
+          selectEventPending = false; // Reset flag AFTER processing
+          console.log('DEBUG: selectEventPending reset to false.');
         }
 
-        // Render
+        // Render (Unchanged)
         try {
           renderer.render(scene, camera);
         } catch (error) {
           console.error('Render error:', error);
         }
+      }
+
+      // --- Full Code ---
+      // Replace the existing onXRFrame function in the previous full code block
+      // with this updated version. Ensure all other functions remain the same.
+      if (!frame) {
+        return;
+      }
+      latestHitPoseMatrix = null;
+
+      // Get Hit Test Results
+      if (hitTestSourceRequested && hitTestSource && referenceSpace) {
+        try {
+          const hitTestResults = frame.getHitTestResults(hitTestSource);
+          if (hitTestResults.length > 0) {
+            const hit = hitTestResults[0];
+            const hitPose = hit.getPose(referenceSpace);
+            if (hitPose) {
+              latestHitPoseMatrix = hitPose.transform.matrix;
+            }
+          }
+        } catch (error) {
+          /* Ignore */
+        }
+      }
+
+      // Process Pending Select Event Based on State
+      if (selectEventPending) {
+        console.log(`Processing select in state: ${measurementState}`);
+        if (latestHitPoseMatrix) {
+          const markerPosition = placeMarker(latestHitPoseMatrix);
+          let pointStored = false;
+          let justCompleted = false; // Flag if measurement finished this tap
+
+          switch (measurementState) {
+            case 'waiting_bl':
+              cornerPoints.bl = markerPosition;
+              measurementState = 'waiting_br';
+              pointStored = true;
+              break;
+            case 'waiting_br':
+              cornerPoints.br = markerPosition;
+              measurementState = 'waiting_tl';
+              pointStored = true;
+              break;
+            case 'waiting_tl':
+              cornerPoints.tl = markerPosition;
+              measurementState = 'done'; // Finished collecting points for W/H
+              pointStored = true;
+              justCompleted = true; // Signal completion
+              break;
+          }
+
+          if (pointStored) {
+            console.log(
+              'Stored point for state:',
+              Object.keys(cornerPoints).find(
+                (key) => cornerPoints[key] === markerPosition
+              )
+            );
+            updateMeasuredLines(cornerPoints); // Update lines immediately
+            // Update instructions AFTER lines/calculations
+            if (justCompleted) {
+              // Calculations happen via updateInstructions when state is 'done'
+              console.log('Measurement points complete.');
+            }
+            updateInstructions();
+          } else {
+            console.log('Tap in unexpected state:', measurementState);
+          }
+        } else {
+          const currentInstructions = infoDivElement.textContent;
+          infoDivElement.textContent =
+            currentInstructions + ' (No surface hit!)';
+          console.log('No hit pose on tap.');
+          setTimeout(() => {
+            // Revert message after delay only if state hasn't changed
+            if (
+              infoDivElement.textContent ===
+              currentInstructions + ' (No surface hit!)'
+            ) {
+              updateInstructions();
+            }
+          }, 1500); // Increased delay
+        }
+        selectEventPending = false;
+      }
+
+      // Render
+      try {
+        renderer.render(scene, camera);
+      } catch (error) {
+        console.error('Render error:', error);
       }
 
       // Place Marker Helper (Unchanged - returns position)
